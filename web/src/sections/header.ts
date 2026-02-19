@@ -1,4 +1,3 @@
-import { icons } from '@/ui/icons';
 import { store } from '@/state/store';
 
 export function createHeader(): HTMLElement {
@@ -6,9 +5,8 @@ export function createHeader(): HTMLElement {
   header.className = 'border-b border-white/[0.06] bg-dark/80 backdrop-blur-sm relative z-20';
   header.innerHTML = `
     <div class="max-w-2xl mx-auto px-4 flex h-12 items-center justify-between">
-      <div class="flex items-center gap-2">
-        ${icons.zap('w-4 h-4 text-neon')}
-        <span style="font-family:'JetBrains Mono',monospace" class="text-[13px] font-bold tracking-tight text-white/90">LocalBolt</span>
+      <div class="flex items-center">
+        <img src="/logo.svg" alt="LocalBolt" class="h-5" />
       </div>
       <div class="flex items-center gap-1.5">
         <div class="status-dot w-1.5 h-1.5 rounded-full bg-red-500/70"></div>
