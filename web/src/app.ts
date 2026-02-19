@@ -8,14 +8,18 @@ export function createApp(root: HTMLElement) {
   const wrapper = document.createElement('div');
   wrapper.className = 'min-h-screen bg-dark text-white flex flex-col';
 
-  // Subtle centered glow behind the card
-  const glow = document.createElement('div');
-  glow.className = 'fixed inset-0 pointer-events-none z-0';
-  glow.innerHTML = `
-    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] bg-[radial-gradient(ellipse,rgba(164,226,0,0.035)_0%,transparent_65%)]"></div>
-  `;
+  // Pulsating grid background centered on card
+  const bgContainer = document.createElement('div');
+  bgContainer.className = 'fixed inset-0 pointer-events-none z-0';
+  bgContainer.style.maskImage = 'linear-gradient(to bottom, white 60%, transparent 100%)';
+  bgContainer.style.webkitMaskImage = 'linear-gradient(to bottom, white 60%, transparent 100%)';
+  const radialBg = document.createElement('div');
+  radialBg.className = 'absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(164,226,0,0.07),rgba(0,0,0,0))] animate-pulse';
+  const gridBg = document.createElement('div');
+  gridBg.className = "absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:radial-gradient(white,transparent_80%)]";
+  bgContainer.append(radialBg, gridBg);
 
-  wrapper.appendChild(glow);
+  wrapper.appendChild(bgContainer);
   wrapper.appendChild(createHeader());
 
   // Main — transfer card vertically + horizontally centered
