@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for LocalBolt",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "opener:default"
+  ]
+}

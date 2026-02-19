@@ -1,0 +1,43 @@
+{
+  "productName": "LocalBolt",
+  "version": "0.1.0",
+  "identifier": "com.the9ines.localbolt",
+  "build": {
+    "frontendDist": "../web/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "cd ../web && npx vite --port 5173",
+    "beforeBuildCommand": "cd ../web && npx vite build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LocalBolt",
+        "width": 520,
+        "height": 700,
+        "minWidth": 400,
+        "minHeight": 500,
+        "center": true,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "iOS": {
+      "developmentTeam": ""
+    }
+  },
+  "plugins": {
+    "opener": {}
+  }
+}
