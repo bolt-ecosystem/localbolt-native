@@ -20,7 +20,7 @@ jobs:
           - platform: macos-latest
             args: '--target x86_64-apple-darwin'
           - platform: ubuntu-22.04
-            args: ''
+            args: '--bundles deb,rpm'
           - platform: windows-latest
             args: ''
 
@@ -72,13 +72,14 @@ jobs:
             | macOS (Apple Silicon) | `LocalBolt_x.x.x_aarch64.dmg` |
             | macOS (Intel) | `LocalBolt_x.x.x_x64.dmg` |
             | Windows | `LocalBolt_x.x.x_x64-setup.exe` |
-            | Linux | `LocalBolt_x.x.x_amd64.AppImage` / `.deb` |
+            | Linux (Debian/Ubuntu) | `LocalBolt_x.x.x_amd64.deb` |
+            | Linux (Fedora/RHEL) | `LocalBolt-x.x.x-1.x86_64.rpm` |
 
             ### Installation Notes
 
             **macOS (unsigned):** Right-click the app → Open → click "Open" to bypass Gatekeeper.
             **Windows (unsigned):** Click "More info" → "Run anyway" on the SmartScreen prompt.
-            **Linux:** `chmod +x LocalBolt_*.AppImage && ./LocalBolt_*.AppImage`
+            **Linux:** `sudo dpkg -i LocalBolt_*.deb` or `sudo rpm -i LocalBolt-*.rpm`
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
