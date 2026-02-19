@@ -53,7 +53,7 @@ function encryptChunk(
   const combined = new Uint8Array(nonce.length + encrypted.length);
   combined.set(nonce);
   combined.set(encrypted, nonce.length);
-  return btoa(String.fromCharCode(...combined));
+  return encodeBase64(combined);
 }
 
 function decryptChunk(
@@ -61,11 +61,11 @@ function decryptChunk(
   remotePublicKey: Uint8Array,
   secretKey: Uint8Array
 ): Uint8Array {
-  const data = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  const data = decodeBase64(base64);
   const nonce = data.slice(0, box.nonceLength);
   const ciphertext = data.slice(box.nonceLength);
   const decrypted = box.open(ciphertext, nonce, remotePublicKey, secretKey);
-  if (!decrypted) throw new EncryptionError('Decryption failed — wrong key or corrupted data');
+  if (!decrypted) throw new EncryptionError('Decryption failed');
   return decrypted;
 }
 
@@ -242,9 +242,13 @@ class WebRTCService {
     console.log('[WEBRTC] Creating peer connection with config:', JSON.stringify(config));
     this.pc = new RTCPeerConnection(config);
 
-    // Send ALL ICE candidates — same-network policy is enforced post-connection
+    // Filter ICE candidates — block relay to enforce same-network policy proactively
     this.pc.onicecandidate = (event) => {
       if (event.candidate) {
+        if (event.candidate.type === 'relay') {
+          console.log('[ICE] Blocking relay candidate (same-network policy)');
+          return;
+        }
         console.log('[ICE] Local candidate:', event.candidate.type, event.candidate.address, event.candidate.protocol);
         this.sendSignal('ice-candidate', event.candidate.toJSON(), this.remotePeerCode)
           .catch(err => console.error('[ICE] Failed to send candidate:', err));
@@ -644,6 +648,31 @@ class WebRTCService {
 
   setConnectionStateHandler(handler: (state: RTCPeerConnectionState) => void) {
     this.connectionStateHandler = handler;
+  }
+
+  /**
+   * Compute a 6-character SAS (Short Authentication String) verification code.
+   * Both peers will produce the same code if they exchanged keys correctly.
+   * Users should confirm the code matches on both devices before transferring
+   * sensitive files. Returns null if keys are not yet exchanged.
+   */
+  async getVerificationCode(): Promise<string | null> {
+    if (!this.remotePublicKey) return null;
+    // Sort keys so both peers compute the same hash regardless of role
+    const keys = [this.keyPair.publicKey, this.remotePublicKey].sort((a, b) => {
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return a[i] - b[i];
+      }
+      return 0;
+    });
+    const combined = new Uint8Array(64);
+    combined.set(keys[0]);
+    combined.set(keys[1], 32);
+    const hash = await crypto.subtle.digest('SHA-256', combined);
+    const hex = Array.from(new Uint8Array(hash))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+    return hex.substring(0, 6).toUpperCase();
   }
 }
 

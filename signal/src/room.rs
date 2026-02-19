@@ -61,12 +61,16 @@ impl RoomManager {
     /// newly registered client.
     ///
     /// Also broadcasts a `peer_joined` message to every existing peer in the room.
-    pub fn add_peer(&self, ip: &str, peer: PeerInfo) -> Vec<PeerData> {
+    pub fn add_peer(&self, ip: &str, peer: PeerInfo) -> Result<Vec<PeerData>, String> {
         let peer_data = peer.to_peer_data();
         let mut existing_peers = Vec::new();
 
-        // Insert into the room, collecting existing peers and broadcasting.
-        let mut room = self.rooms.entry(ip.to_string()).or_insert_with(Vec::new);
+        let mut room = self.rooms.entry(ip.to_string()).or_default();
+
+        // Reject duplicate peer codes within the same room.
+        if room.iter().any(|p| p.peer_code == peer.peer_code) {
+            return Err(format!("Peer code '{}' already in use", peer.peer_code));
+        }
 
         // Snapshot existing peers for the "peers" response.
         for p in room.iter() {
@@ -92,7 +96,7 @@ impl RoomManager {
         );
 
         room.push(peer);
-        existing_peers
+        Ok(existing_peers)
     }
 
     /// Remove a peer from the room for the given IP address.
@@ -202,7 +206,10 @@ impl<'de> serde::Deserialize<'de> for ServerMessage {
         match msg_type {
             "peers" => {
                 let peers: Vec<PeerData> = serde_json::from_value(
-                    value.get("peers").cloned().unwrap_or(serde_json::Value::Array(vec![])),
+                    value
+                        .get("peers")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Array(vec![])),
                 )
                 .map_err(serde::de::Error::custom)?;
                 Ok(ServerMessage::Peers { peers })

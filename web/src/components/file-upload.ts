@@ -1,6 +1,7 @@
 import { icons } from '@/ui/icons';
 import { store } from '@/state/store';
 import { showToast } from '@/ui/toast';
+import { escapeHTML } from '@/lib/sanitize';
 import { createTransferProgress } from './transfer-progress';
 import type WebRTCService from '@/services/webrtc/WebRTCService';
 import type { TransferProgress } from '@/services/webrtc/WebRTCService';
@@ -85,7 +86,7 @@ export function createFileUpload(): HTMLElement {
       row.innerHTML = `
         <div class="flex items-center space-x-3 min-w-0 flex-1">
           ${icons.file('w-5 h-5 shrink-0 text-white/50')}
-          <span class="text-sm truncate pr-2">${file.name}</span>
+          <span class="text-sm truncate pr-2">${escapeHTML(file.name)}</span>
         </div>
       `;
       if (!progress) {

@@ -1,5 +1,6 @@
 import { icons } from '@/ui/icons';
 import { store } from '@/state/store';
+import { escapeHTML } from '@/lib/sanitize';
 import type { DiscoveredDevice } from '@/services/signaling/SignalingProvider';
 
 const deviceIconMap: Record<string, (cls: string) => string> = {
@@ -82,7 +83,7 @@ function renderDeviceList(
         <div class="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/5 flex items-center justify-center group-hover:border-neon/20 transition-colors">
           ${iconFn('w-4 h-4 text-gray-500 group-hover:text-neon/70 transition-colors')}
         </div>
-        <span class="text-sm text-gray-300 group-hover:text-white transition-colors">${peer.deviceName}</span>
+        <span class="text-sm text-gray-300 group-hover:text-white transition-colors">${escapeHTML(peer.deviceName)}</span>
         <svg class="w-4 h-4 ml-auto text-gray-600 group-hover:text-neon/50 transition-colors" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
       `;
       btn.addEventListener('click', () => onSelect(peer.peerCode));
@@ -107,7 +108,7 @@ function renderAwaitingApproval(deviceName: string, onCancel: () => void): HTMLE
       <div class="w-3 h-3 rounded-full bg-neon/40"></div>
     </div>
     <div class="text-center space-y-1">
-      <p class="text-sm text-white/80">Waiting for <span class="text-neon">${deviceName}</span> to accept...</p>
+      <p class="text-sm text-white/80">Waiting for <span class="text-neon">${escapeHTML(deviceName)}</span> to accept...</p>
       <p class="text-xs text-gray-500">The other device will be asked to confirm</p>
     </div>
   `;
@@ -135,7 +136,7 @@ function renderIncomingRequest(
       ${iconFn('w-6 h-6 text-neon')}
     </div>
     <div class="text-center space-y-1">
-      <p class="text-sm font-medium text-white"><span class="text-neon">${deviceName}</span> wants to connect</p>
+      <p class="text-sm font-medium text-white"><span class="text-neon">${escapeHTML(deviceName)}</span> wants to connect</p>
       <p class="text-xs text-gray-500">Accept to start sharing files</p>
     </div>
   `;
@@ -171,7 +172,7 @@ function renderConnected(
   row.innerHTML = `
     <div class="flex items-center gap-2.5 min-w-0">
       ${iconFn('w-4 h-4 text-neon flex-shrink-0')}
-      <span class="text-sm text-white/80 truncate">${device.deviceName}</span>
+      <span class="text-sm text-white/80 truncate">${escapeHTML(device.deviceName)}</span>
     </div>
   `;
 
