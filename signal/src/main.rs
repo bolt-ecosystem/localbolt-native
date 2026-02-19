@@ -24,12 +24,10 @@ async fn main() {
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(3001);
 
-    let addr: SocketAddr = format!("{host}:{port}")
-        .parse()
-        .unwrap_or_else(|e| {
-            eprintln!("invalid address '{host}:{port}': {e}");
-            std::process::exit(1);
-        });
+    let addr: SocketAddr = format!("{host}:{port}").parse().unwrap_or_else(|e| {
+        eprintln!("invalid address '{host}:{port}': {e}");
+        std::process::exit(1);
+    });
 
     let server = SignalingServer::new(addr);
 
