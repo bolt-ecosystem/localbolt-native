@@ -4,6 +4,18 @@ Native desktop app for [LocalBolt](https://localbolt.site). Encrypted peer-to-pe
 
 Built with [Tauri v2](https://tauri.app). No browser needed. Open the app and start transferring.
 
+## Download
+
+| Platform | Download |
+|----------|----------|
+| macOS (Apple Silicon) | [LocalBolt_1.0.0_aarch64.dmg](https://github.com/the9ines/localbolt-app/releases/latest) |
+| macOS (Intel) | [LocalBolt_1.0.0_x64.dmg](https://github.com/the9ines/localbolt-app/releases/latest) |
+| Windows | [LocalBolt_1.0.0_x64-setup.exe](https://github.com/the9ines/localbolt-app/releases/latest) |
+| Linux | [LocalBolt_1.0.0_amd64.AppImage](https://github.com/the9ines/localbolt-app/releases/latest) |
+
+> **macOS:** Right-click the app, click Open, then click Open again to bypass Gatekeeper.
+> **Windows:** Click "More info" then "Run anyway" on the SmartScreen prompt.
+
 ## Features
 
 - **Embedded signal server** - starts automatically with the app, no setup required
@@ -13,20 +25,20 @@ Built with [Tauri v2](https://tauri.app). No browser needed. Open the app and st
 - **Cross-discovery** - finds devices running the website, the desktop app, or the self-hosted version
 - **Works offline** - LAN discovery works with no internet connection
 
-## Quick Start
+## Build from Source
 
 ```bash
 cd web && npm install && npx vite build
 cd ../src-tauri && cargo tauri dev
 ```
 
-## Build for Production
+### Production build
 
 ```bash
-npx tauri build
+cargo tauri build
 ```
 
-Produces platform-specific installers: `.app`/`.dmg` (macOS), `.msi` (Windows), `.deb`/`.AppImage` (Linux).
+Produces platform-specific installers: `.app`/`.dmg` (macOS), `.msi`/`.exe` (Windows), `.deb`/`.AppImage` (Linux).
 
 ## Structure
 
