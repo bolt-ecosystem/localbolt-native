@@ -35,7 +35,8 @@ cd ../src-tauri && cargo tauri dev
 ### Production build
 
 ```bash
-cargo tauri build
+cd web && npm install && npx vite build
+cd ../src-tauri && cargo tauri build
 ```
 
 Produces platform-specific installers: `.app`/`.dmg` (macOS), `.msi`/`.exe` (Windows), `.deb`/`.AppImage` (Linux).

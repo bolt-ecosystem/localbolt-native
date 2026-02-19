@@ -6,7 +6,7 @@
     "frontendDist": "../web/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "cd web && npx vite --port 5173",
-    "beforeBuildCommand": "cd web && npx vite build"
+    "beforeBuildCommand": ""
   },
   "app": {
     "windows": [
