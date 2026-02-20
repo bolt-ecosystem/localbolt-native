@@ -65,11 +65,26 @@ When you launch the app:
 4. Devices from both sources appear in the device list
 5. Select a device, approve the connection, and transfer files
 
+## Ecosystem
+
+LocalBolt App is part of the [Bolt Protocol](https://github.com/the9ines/bolt-protocol) ecosystem.
+
+| Relationship | Repository |
+|-------------|-----------|
+| Protocol spec | [bolt-protocol](https://github.com/the9ines/bolt-protocol) |
+| SDK dependency | [bolt-core-sdk](https://github.com/the9ines/bolt-core-sdk) |
+| Bundles (subtree) | [bolt-rendezvous](https://github.com/the9ines/bolt-rendezvous) |
+| Bundles | [bolt-daemon](https://github.com/the9ines/bolt-daemon) |
+| Lite web version | [localbolt](https://github.com/the9ines/localbolt) |
+| Web app | [localbolt-v3](https://github.com/the9ines/localbolt-v3) |
+
+This is an **open-source** project. Free to use, build, and modify.
+
 ## Related
 
-- **[localbolt.site](https://localbolt.site)** - use it in the browser, no install
-- **[LocalBolt (self-hosted)](https://github.com/the9ines/localbolt)** - download and run on your own network
+- **[localbolt.site](https://localbolt.site)** — use it in the browser, no install
+- **[LocalBolt (self-hosted)](https://github.com/the9ines/localbolt)** — download and run on your own network
 
 ## License
 
-MIT - built by [the9ines](https://the9ines.com)
+MIT — built by [the9ines](https://the9ines.com)
