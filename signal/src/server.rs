@@ -78,7 +78,7 @@ pub async fn handle_connection(
         while let Some(msg) = rx.recv().await {
             match serde_json::to_string(&msg) {
                 Ok(json) => {
-                    if ws_sink.send(Message::Text(json.into())).await.is_err() {
+                    if ws_sink.send(Message::Text(json)).await.is_err() {
                         break;
                     }
                 }
