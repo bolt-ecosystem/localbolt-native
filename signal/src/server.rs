@@ -292,6 +292,18 @@ fn is_private_ip(ip: &str) -> bool {
             }
         }
     }
+    // IPv4 CGNAT / shared address space: 100.64.0.0/10 (100.64.0.0 - 100.127.255.255)
+    // Used by Tailscale, some WireGuard meshes, and carrier-grade NAT.
+    // Devices on the same Tailscale/WireGuard mesh are "local" to each other.
+    if ip.starts_with("100.") {
+        if let Some(second) = ip.split('.').nth(1) {
+            if let Ok(n) = second.parse::<u8>() {
+                if (64..=127).contains(&n) {
+                    return true;
+                }
+            }
+        }
+    }
     // IPv6 loopback
     if ip == "::1" {
         return true;

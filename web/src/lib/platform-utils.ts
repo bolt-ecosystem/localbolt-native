@@ -124,6 +124,7 @@ export const isPrivateIP = (ip: string): boolean => {
     /^172\.(1[6-9]|2[0-9]|3[0-1])\./,          // 172.16.0.0/12
     /^192\.168\./,                              // 192.168.0.0/16
     /^169\.254\./,                              // 169.254.0.0/16 (link-local)
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // 100.64.0.0/10 (CGNAT/Tailscale/WireGuard)
     /^fc[0-9a-f]{2}:/i,                         // IPv6 ULA
     /^fd[0-9a-f]{2}:/i,                         // IPv6 ULA
     /^fe80:/i,                                  // IPv6 link-local
