@@ -54,10 +54,18 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Checkout bolt-core-sdk
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: the9ines/bolt-core-sdk
+          path: ../bolt-core-sdk
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Build bolt-core-sdk
+        working-directory: ../bolt-core-sdk/ts/bolt-core
+        run: npm ci && npm run build
       - run: npm ci
       - run: npm run build
