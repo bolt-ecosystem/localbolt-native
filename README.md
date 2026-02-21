@@ -67,10 +67,11 @@ When you launch the app:
 
 ## Ecosystem
 
-LocalBolt App is part of the [Bolt Protocol](https://github.com/the9ines/bolt-protocol) ecosystem.
+LocalBolt App is part of the [Bolt Protocol](https://github.com/the9ines/bolt-protocol) ecosystem. See the [bolt-ecosystem](https://github.com/the9ines/bolt-ecosystem) repo for governance documents, PRD, and roadmap.
 
 | Relationship | Repository |
 |-------------|-----------|
+| Ecosystem governance | [bolt-ecosystem](https://github.com/the9ines/bolt-ecosystem) |
 | Protocol spec | [bolt-protocol](https://github.com/the9ines/bolt-protocol) |
 | SDK dependency | [bolt-core-sdk](https://github.com/the9ines/bolt-core-sdk) |
 | Bundles (subtree) | [bolt-rendezvous](https://github.com/the9ines/bolt-rendezvous) |
