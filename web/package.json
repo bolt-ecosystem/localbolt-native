@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@the9ines/bolt-core": "0.0.4",
+    "@the9ines/bolt-core": "0.0.5",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1"
   },
