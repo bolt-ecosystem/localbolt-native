@@ -1,6 +1,5 @@
-import { box, randomBytes } from 'tweetnacl';
-import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import { WebRTCError, ConnectionError, SignalingError, TransferError, EncryptionError } from '@/types/webrtc-errors';
+import { sealBoxPayload, openBoxPayload, generateEphemeralKeyPair, toBase64, fromBase64, DEFAULT_CHUNK_SIZE, EncryptionError } from '@the9ines/bolt-core';
+import { WebRTCError, ConnectionError, SignalingError, TransferError } from '@/types/webrtc-errors';
 import { getLocalOnlyRTCConfig } from '@/lib/platform-utils';
 import type { SignalingProvider, SignalMessage } from '@/services/signaling';
 
@@ -39,39 +38,6 @@ interface FileChunkMessage {
   paused?: boolean;
   resumed?: boolean;
 }
-
-// ─── Encryption Helpers ─────────────────────────────────────────────────────
-
-function encryptChunk(
-  chunk: Uint8Array,
-  remotePublicKey: Uint8Array,
-  secretKey: Uint8Array
-): string {
-  const nonce = randomBytes(box.nonceLength);
-  const encrypted = box(chunk, nonce, remotePublicKey, secretKey);
-  if (!encrypted) throw new EncryptionError('Encryption returned null');
-  const combined = new Uint8Array(nonce.length + encrypted.length);
-  combined.set(nonce);
-  combined.set(encrypted, nonce.length);
-  return encodeBase64(combined);
-}
-
-function decryptChunk(
-  base64: string,
-  remotePublicKey: Uint8Array,
-  secretKey: Uint8Array
-): Uint8Array {
-  const data = decodeBase64(base64);
-  const nonce = data.slice(0, box.nonceLength);
-  const ciphertext = data.slice(box.nonceLength);
-  const decrypted = box.open(ciphertext, nonce, remotePublicKey, secretKey);
-  if (!decrypted) throw new EncryptionError('Decryption failed');
-  return decrypted;
-}
-
-// ─── Constants ──────────────────────────────────────────────────────────────
-
-const CHUNK_SIZE = 16384; // 16KB universal
 
 // ─── WebRTCService ──────────────────────────────────────────────────────────
 
@@ -118,7 +84,7 @@ class WebRTCService {
     onProgress?: (progress: TransferProgress) => void
   ) {
     console.log('[INIT] WebRTCService with peer code:', localPeerCode);
-    this.keyPair = box.keyPair();
+    this.keyPair = generateEphemeralKeyPair();
     this.onProgressCallback = onProgress;
     this.signaling = signaling;
     this.signaling.onSignal((signal) => this.handleSignal(signal));
@@ -159,7 +125,7 @@ class WebRTCService {
 
   private async handleOffer(signal: SignalMessage) {
     console.log('[SIGNALING] Processing offer from', signal.from);
-    this.remotePublicKey = decodeBase64(signal.data.publicKey);
+    this.remotePublicKey = fromBase64(signal.data.publicKey);
 
     const pc = this.createPeerConnection();
     await pc.setRemoteDescription(new RTCSessionDescription(signal.data.offer));
@@ -171,7 +137,7 @@ class WebRTCService {
 
     await this.sendSignal('answer', {
       answer,
-      publicKey: encodeBase64(this.keyPair.publicKey),
+      publicKey: toBase64(this.keyPair.publicKey),
       peerCode: this.localPeerCode,
     }, signal.from);
 
@@ -180,7 +146,7 @@ class WebRTCService {
 
   private async handleAnswer(signal: SignalMessage) {
     console.log('[SIGNALING] Processing answer from', signal.from);
-    this.remotePublicKey = decodeBase64(signal.data.publicKey);
+    this.remotePublicKey = fromBase64(signal.data.publicKey);
 
     if (!this.pc) throw new ConnectionError('No peer connection for answer');
     console.log('[SIGNALING] Signaling state:', this.pc.signalingState);
@@ -368,7 +334,7 @@ class WebRTCService {
 
     await this.sendSignal('offer', {
       offer,
-      publicKey: encodeBase64(this.keyPair.publicKey),
+      publicKey: toBase64(this.keyPair.publicKey),
       peerCode: this.localPeerCode,
     }, remotePeerCode);
 
@@ -432,7 +398,7 @@ class WebRTCService {
       throw new EncryptionError('No remote public key');
     }
 
-    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const totalChunks = Math.ceil(file.size / DEFAULT_CHUNK_SIZE);
     console.log(`[TRANSFER] Sending ${file.name} (${file.size} bytes, ${totalChunks} chunks)`);
     this.transferCancelled = false;
     this.transferPaused = false;
@@ -449,11 +415,11 @@ class WebRTCService {
           if (this.transferCancelled) throw new TransferError('Transfer cancelled while paused');
         }
 
-        const start = i * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const start = i * DEFAULT_CHUNK_SIZE;
+        const end = Math.min(start + DEFAULT_CHUNK_SIZE, file.size);
         const raw = new Uint8Array(await file.slice(start, end).arrayBuffer());
 
-        const encrypted = encryptChunk(raw, this.remotePublicKey!, this.keyPair.secretKey);
+        const encrypted = sealBoxPayload(raw, this.remotePublicKey!, this.keyPair.secretKey);
 
         const msg: FileChunkMessage = {
           type: 'file-chunk',
@@ -545,7 +511,7 @@ class WebRTCService {
     }
 
     try {
-      const decrypted = decryptChunk(chunk, this.remotePublicKey, this.keyPair.secretKey);
+      const decrypted = openBoxPayload(chunk, this.remotePublicKey, this.keyPair.secretKey);
       const buffer = this.receiveBuffers.get(filename)!;
       buffer[chunkIndex] = new Blob([decrypted]);
 
