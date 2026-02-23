@@ -1,6 +1,5 @@
 import { createPeerConnection } from '@/components/peer-connection';
-import { createFileUpload } from '@/components/file-upload';
-import { store } from '@/state/store';
+import { createFileUpload, store } from '@the9ines/bolt-transport-web';
 
 export function createTransfer(): HTMLElement {
   const card = document.createElement('div');

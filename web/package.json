@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@the9ines/bolt-core": "0.0.5",
+    "@the9ines/bolt-transport-web": "0.1.0",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1"
   },

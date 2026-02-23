@@ -1,15 +1,10 @@
-import { store } from '@/state/store';
-import { showToast } from '@/ui/toast';
-import { DualSignaling, detectDeviceType, getDeviceName } from '@/services/signaling';
-import { generateSecurePeerCode } from '@/lib/crypto-utils';
-import WebRTCService from '@/services/webrtc/WebRTCService';
-import { WebRTCError, SignalingError } from '@/types/webrtc-errors';
-import { detectDevice } from '@/lib/platform-utils';
-import { createConnectionStatus } from './connection-status';
-import { createDeviceDiscovery } from './device-discovery';
-import { setWebrtcRef } from './file-upload';
-import type { TransferProgress } from '@/services/webrtc/WebRTCService';
-import type { SignalMessage } from '@/services/signaling/SignalingProvider';
+import { generateSecurePeerCode } from '@the9ines/bolt-core';
+import {
+  store, showToast, DualSignaling, detectDeviceType, getDeviceName,
+  WebRTCService, WebRTCError, SignalingError, detectDevice,
+  createConnectionStatus, createDeviceDiscovery, setWebrtcRef,
+} from '@the9ines/bolt-transport-web';
+import type { TransferProgress, SignalMessage } from '@the9ines/bolt-transport-web';
 
 let signalingRef: DualSignaling | null = null;
 let rtcServiceRef: WebRTCService | null = null;

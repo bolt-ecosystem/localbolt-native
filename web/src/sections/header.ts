@@ -1,4 +1,4 @@
-import { store } from '@/state/store';
+import { store } from '@the9ines/bolt-transport-web';
 
 export function createHeader(): HTMLElement {
   const header = document.createElement('header');
