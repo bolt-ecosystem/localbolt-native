@@ -67,3 +67,5 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run build
+      - name: Transport drift guard
+        run: bash ../scripts/check-transport-drift.sh src
