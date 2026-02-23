@@ -63,9 +63,15 @@ jobs:
           scope: '@the9ines'
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Transport version pin guard
+        working-directory: .
+        run: bash scripts/check-transport-version-pin.sh
       - run: npm ci
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Transport single-install guard
+        working-directory: .
+        run: bash scripts/check-transport-single-install.sh
       - run: npm run build
       - name: Transport drift guard
         run: bash ../scripts/check-transport-drift.sh src
