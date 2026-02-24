@@ -33,6 +33,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bolt-rendezvous"
+version = "0.1.1"
+dependencies = [
+ "dashmap",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -304,21 +319,6 @@ name = "libc"
 version = "0.2.182"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112"
-
-[[package]]
-name = "localbolt-signal"
-version = "0.1.0"
-dependencies = [
- "dashmap",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
 
 [[package]]
 name = "lock_api"

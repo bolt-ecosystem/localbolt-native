@@ -8,7 +8,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use localbolt_signal::SignalingServer;
+//! use bolt_rendezvous::SignalingServer;
 //! use std::net::SocketAddr;
 //!
 //! #[tokio::main]
