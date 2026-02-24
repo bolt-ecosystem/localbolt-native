@@ -4,6 +4,22 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.1.0 — 2026-02-24
+
+**Commit:** c6bb71e
+
+SDK dependency upgrade. Bumped @the9ines/bolt-core from 0.2.0 to 0.3.0 and
+@the9ines/bolt-transport-web from 0.2.0 to 0.6.0. Both packages now resolve
+from npm.pkg.github.com (transport-web previously used a stale local file:
+reference). Zero application code changes; only web/package.json and
+web/package-lock.json modified. Build (vite) passes. No test suite exists.
+
+**Files changed:**
+- web/package.json
+- web/package-lock.json
+
+---
+
 ## localbolt-app-v1.0.14 — 2026-02-23
 
 **Commit:** 9bea4ba

@@ -6,16 +6,16 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.0.14
-- **Commit:** 9bea4ba
-- **Date:** 2026-02-23
+- **Tag:** localbolt-app-v1.1.0
+- **Commit:** c6bb71e
+- **Date:** 2026-02-24
 
 ## Dependencies (web/package.json)
 
 | Package | Version |
 |---------|---------|
-| @the9ines/bolt-core | 0.2.0 |
-| @the9ines/bolt-transport-web | 0.2.0 |
+| @the9ines/bolt-core | 0.3.0 |
+| @the9ines/bolt-transport-web | 0.6.0 |
 | tweetnacl | ^1.0.3 |
 | tweetnacl-util | ^0.15.1 |
 
@@ -35,3 +35,5 @@
 
 - **Branch:** main
 - **Status:** Active
+- **Build:** Passing (vite)
+- **Tests:** No test suite
