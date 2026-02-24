@@ -8,9 +8,70 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
+  gate-ci:
+    name: Gate — Verify CI Passed
+    runs-on: ubuntu-latest
+    steps:
+      - name: Bypass notice (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "::warning::workflow_dispatch bypasses CI gate. Use only for emergency re-release of known-good SHA."
+
+      - name: Verify CI workflow passed for this commit
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Checking CI status for SHA ${{ github.sha }}..."
+
+          # Resolve CI workflow ID by name
+          CI_ID=$(gh api repos/${{ github.repository }}/actions/workflows \
+            --jq '.workflows[] | select(.name=="CI") | .id')
+
+          if [ -z "$CI_ID" ]; then
+            echo "::error::Could not find CI workflow. Release blocked."
+            exit 1
+          fi
+          echo "CI workflow ID: $CI_ID"
+
+          # Poll for up to 10 minutes (CI may still be running from tag push)
+          for i in $(seq 1 20); do
+            # Get the most recent run for this SHA with event=push
+            RUN_JSON=$(gh api "repos/${{ github.repository }}/actions/workflows/${CI_ID}/runs?per_page=50" \
+              --jq "[.workflow_runs[] | select(.head_sha == \"${{ github.sha }}\" and .event == \"push\")] | sort_by(.run_number) | reverse | .[0]" 2>/dev/null || echo "null")
+
+            if [ "$RUN_JSON" = "null" ] || [ -z "$RUN_JSON" ]; then
+              echo "No CI run found for SHA ${{ github.sha }} — waiting 30s (attempt $i/20)..."
+              sleep 30
+              continue
+            fi
+
+            STATUS=$(echo "$RUN_JSON" | jq -r '.status')
+            CONCLUSION=$(echo "$RUN_JSON" | jq -r '.conclusion')
+
+            if [ "$STATUS" != "completed" ]; then
+              echo "CI status: $STATUS — waiting 30s (attempt $i/20)..."
+              sleep 30
+              continue
+            fi
+
+            if [ "$CONCLUSION" = "success" ]; then
+              echo "CI passed for ${{ github.sha }}"
+              exit 0
+            else
+              echo "::error::CI concluded with '$CONCLUSION' for ${{ github.sha }}. Release blocked."
+              exit 1
+            fi
+          done
+
+          echo "::error::CI did not complete within 10 minutes for ${{ github.sha }}. Release blocked."
+          exit 1
+
   release:
+    needs: [gate-ci]
     strategy:
       fail-fast: false
       matrix:
@@ -27,7 +88,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install dependencies (Ubuntu)
         if: matrix.platform == 'ubuntu-22.04'
@@ -36,18 +97,18 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache-dependency-path: web/package-lock.json
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
           workspaces: './src-tauri -> target'
 
