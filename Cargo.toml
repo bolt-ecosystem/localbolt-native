@@ -1,8 +1,8 @@
 [package]
-name = "localbolt-signal"
-version = "0.1.0"
+name = "bolt-rendezvous"
+version = "0.1.1"
 edition = "2021"
-description = "WebSocket signaling server for LocalBolt P2P file transfer"
+description = "WebSocket signaling server for the Bolt protocol (peer discovery and session coordination)"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -14,3 +14,6 @@ uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dashmap = "6"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util", "macros", "rt"] }

@@ -12,6 +12,11 @@ A lightweight WebSocket server that handles peer discovery and signal routing fo
 - Groups peers into rooms based on IP heuristics (RFC 1918, CGNAT, link-local).
 - Provides presence notifications (join, leave, peer list).
 
+**Signaling only.** The rendezvous server handles coordination metadata (SDP
+offers/answers, ICE candidates, hello/ack). File payload bytes never transit
+the rendezvous server — all payload data flows directly between peers over
+WebRTC DataChannel (P2P).
+
 The rendezvous server is **untrusted**. It cannot observe file contents, encryption keys, or transfer metadata. All security guarantees come from Bolt-layer encryption.
 
 ## Dependencies
