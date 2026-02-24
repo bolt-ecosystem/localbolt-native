@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.0 — 2026-02-24
+
+**Commit:** 90584bf
+
+Bump @the9ines/bolt-core from 0.3.0 to 0.4.0 (A1 adoption). Dead constant
+exports removed upstream; no behavior changes. transport-web remains 0.6.0.
+Build (vite) passes. No test suite.
+
+- Files changed:
+  - `web/package.json`
+  - `web/package-lock.json`
+
 ## localbolt-app-v1.1.0 — 2026-02-24
 
 **Commit:** c6bb71e
