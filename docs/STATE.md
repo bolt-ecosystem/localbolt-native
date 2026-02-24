@@ -6,8 +6,8 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.0.13
-- **Commit:** 561ca1c
+- **Tag:** localbolt-app-v1.0.14
+- **Commit:** 9bea4ba
 - **Date:** 2026-02-23
 
 ## Dependencies (web/package.json)
