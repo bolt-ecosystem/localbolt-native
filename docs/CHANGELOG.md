@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.1 — 2026-02-24
+
+**Commit:** c541b36
+
+Remove hardcoded `wss://localbolt-signal.fly.dev` fallback from
+peer-connection.ts (SIG-3). Cloud signaling URL (`VITE_CLOUD_SIGNAL_URL`)
+now required via explicit configuration — if unset, cloud signaling is
+disabled with console warning and app operates in local-only mode. Local
+signaling fallback (`ws://<hostname>:3001`) preserved. Build passes.
+
+- Files changed:
+  - `web/src/components/peer-connection.ts`
+
 ## localbolt-app-v1.2.0 — 2026-02-24
 
 **Commit:** 90584bf
