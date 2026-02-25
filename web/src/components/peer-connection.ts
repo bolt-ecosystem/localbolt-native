@@ -241,8 +241,13 @@ export function createPeerConnection(): HTMLElement {
 
   // Dual signaling: local (LAN) + cloud (internet)
   const localUrl = import.meta.env.VITE_SIGNAL_URL || `ws://${window.location.hostname}:3001`;
-  const cloudUrl = import.meta.env.VITE_CLOUD_SIGNAL_URL || 'wss://localbolt-signal.fly.dev';
-  const signaling = new DualSignaling(localUrl, cloudUrl);
+  const cloudUrl = import.meta.env.VITE_CLOUD_SIGNAL_URL as string | undefined;
+
+  if (!cloudUrl) {
+    console.warn('[SIGNALING] VITE_CLOUD_SIGNAL_URL not set — cloud signaling disabled, local-only mode');
+  }
+
+  const signaling = new DualSignaling(localUrl, cloudUrl ?? '');
   signalingRef = signaling;
 
   // Update header indicator when connection state changes
