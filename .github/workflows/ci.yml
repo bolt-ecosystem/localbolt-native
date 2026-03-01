@@ -74,6 +74,8 @@ jobs:
       - name: Transport single-install guard
         working-directory: .
         run: bash scripts/check-transport-single-install.sh
+      - name: Web tests
+        run: npm test
       - run: npm run build
       - name: Transport drift guard
         run: bash ../scripts/check-transport-drift.sh src
