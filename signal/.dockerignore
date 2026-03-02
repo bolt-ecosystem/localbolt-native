@@ -1,0 +1,6 @@
+target/
+protocol/target/
+.git/
+.DS_Store
+*.md
+docs/

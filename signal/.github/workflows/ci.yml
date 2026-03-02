@@ -20,8 +20,16 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --check
 
-      - name: cargo clippy
-        run: cargo clippy -- -W clippy::all
+      - name: cargo clippy (deny warnings)
+        run: cargo clippy -- -D warnings
 
       - name: cargo test
         run: cargo test
+
+      - name: cargo test (bolt-core interop)
+        run: |
+          git clone --depth 1 https://github.com/the9ines/bolt-core-sdk.git ../bolt-core-sdk
+          cargo add bolt-core --optional --path ../bolt-core-sdk/rust/bolt-core
+          sed -i 's/with-bolt-core-tests = \[\]/with-bolt-core-tests = ["bolt-core"]/' Cargo.toml
+          cargo test --features with-bolt-core-tests
+          git checkout -- Cargo.toml Cargo.lock

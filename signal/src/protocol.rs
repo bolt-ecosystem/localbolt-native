@@ -1,74 +1,10 @@
 //! Protocol message types for LocalBolt WebSocket signaling.
 //!
-//! Defines the JSON message format exchanged between clients and the signaling server.
-//! All messages are serialized/deserialized via serde with `#[serde(tag = "type")]`
-//! to produce `{ "type": "...", ... }` JSON objects.
+//! This module re-exports the canonical types from `bolt-rendezvous-protocol`.
+//! All message types, enums, and structs are defined in the shared crate to
+//! eliminate duplication between the server and client implementations.
 
-use serde::{Deserialize, Serialize};
-
-/// Device type reported by connecting peers.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum DeviceType {
-    Phone,
-    Tablet,
-    Laptop,
-    Desktop,
-}
-
-/// Public peer information broadcast to room members.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PeerData {
-    pub peer_code: String,
-    pub device_name: String,
-    pub device_type: DeviceType,
-}
-
-// ---------------------------------------------------------------------------
-// Client -> Server messages
-// ---------------------------------------------------------------------------
-
-/// Messages sent from a client to the signaling server.
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ClientMessage {
-    /// First message a client must send after connecting.
-    Register {
-        peer_code: String,
-        device_name: String,
-        device_type: DeviceType,
-    },
-    /// Relay a WebRTC signaling payload to another peer.
-    Signal {
-        to: String,
-        payload: serde_json::Value,
-    },
-    /// Keepalive ping from client (no-op, just prevents idle timeout).
-    Ping,
-}
-
-// ---------------------------------------------------------------------------
-// Server -> Client messages
-// ---------------------------------------------------------------------------
-
-/// Messages sent from the signaling server to clients.
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ServerMessage {
-    /// Full list of peers currently in the same IP room (sent on registration).
-    Peers { peers: Vec<PeerData> },
-    /// A new peer joined the IP room.
-    PeerJoined { peer: PeerData },
-    /// A peer left the IP room.
-    PeerLeft { peer_code: String },
-    /// Relayed signaling payload from another peer.
-    Signal {
-        from: String,
-        payload: serde_json::Value,
-    },
-    /// Error response for invalid or malformed messages.
-    Error { message: String },
-}
+pub use bolt_rendezvous_protocol::*;
 
 #[cfg(test)]
 mod tests {
