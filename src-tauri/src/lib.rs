@@ -1,4 +1,4 @@
-use localbolt_signal::SignalingServer;
+use bolt_rendezvous::SignalingServer;
 use std::net::SocketAddr;
 use tracing_subscriber::EnvFilter;
 
