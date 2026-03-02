@@ -5,6 +5,7 @@ edition = "2021"
 description = "WebSocket signaling server for the Bolt protocol (peer discovery and session coordination)"
 
 [dependencies]
+bolt-rendezvous-protocol = { path = "protocol" }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
@@ -14,6 +15,10 @@ uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dashmap = "6"
+
+[features]
+default = []
+with-bolt-core-tests = []
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "macros", "rt"] }

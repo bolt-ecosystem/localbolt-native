@@ -177,80 +177,8 @@ impl Default for RoomManager {
     }
 }
 
-// ServerMessage needs Clone for broadcasting.
-impl Clone for ServerMessage {
-    fn clone(&self) -> Self {
-        // We serialize and deserialize to avoid manual field cloning for the
-        // serde_json::Value payload. This only happens on broadcast fan-out,
-        // which is infrequent and low-volume.
-        let json = serde_json::to_string(self).expect("ServerMessage serialization");
-        serde_json::from_str(&json).unwrap_or_else(|_| ServerMessage::Error {
-            message: "internal clone error".into(),
-        })
-    }
-}
-
-// ServerMessage needs Deserialize only for the Clone impl above.
-impl<'de> serde::Deserialize<'de> for ServerMessage {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Use an intermediate representation to avoid infinite recursion.
-        let value = serde_json::Value::deserialize(deserializer)?;
-        let msg_type = value
-            .get("type")
-            .and_then(|t| t.as_str())
-            .ok_or_else(|| serde::de::Error::custom("missing type field"))?;
-
-        match msg_type {
-            "peers" => {
-                let peers: Vec<PeerData> = serde_json::from_value(
-                    value
-                        .get("peers")
-                        .cloned()
-                        .unwrap_or(serde_json::Value::Array(vec![])),
-                )
-                .map_err(serde::de::Error::custom)?;
-                Ok(ServerMessage::Peers { peers })
-            }
-            "peer_joined" => {
-                let peer: PeerData =
-                    serde_json::from_value(value.get("peer").cloned().unwrap_or_default())
-                        .map_err(serde::de::Error::custom)?;
-                Ok(ServerMessage::PeerJoined { peer })
-            }
-            "peer_left" => {
-                let peer_code = value
-                    .get("peer_code")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                Ok(ServerMessage::PeerLeft { peer_code })
-            }
-            "signal" => {
-                let from = value
-                    .get("from")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let payload = value.get("payload").cloned().unwrap_or_default();
-                Ok(ServerMessage::Signal { from, payload })
-            }
-            "error" => {
-                let message = value
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                Ok(ServerMessage::Error { message })
-            }
-            other => Err(serde::de::Error::custom(format!(
-                "unknown message type: {other}"
-            ))),
-        }
-    }
-}
+// Clone and Deserialize for ServerMessage are now derived automatically
+// by the bolt-rendezvous-protocol crate.
 
 #[cfg(test)]
 mod tests {
@@ -347,7 +275,10 @@ mod tests {
             ServerMessage::PeerJoined { peer } => {
                 assert_eq!(peer.peer_code, "SECOND");
             }
-            other => panic!("expected PeerJoined, got: {:?}", serde_json::to_string(&other)),
+            other => panic!(
+                "expected PeerJoined, got: {:?}",
+                serde_json::to_string(&other)
+            ),
         }
     }
 
@@ -404,7 +335,10 @@ mod tests {
             ServerMessage::PeerLeft { peer_code } => {
                 assert_eq!(peer_code, "LEAVE");
             }
-            other => panic!("expected PeerLeft, got: {:?}", serde_json::to_string(&other)),
+            other => panic!(
+                "expected PeerLeft, got: {:?}",
+                serde_json::to_string(&other)
+            ),
         }
     }
 
