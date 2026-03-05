@@ -3,9 +3,12 @@ import {
   store, showToast, DualSignaling, detectDeviceType, getDeviceName,
   WebRTCService, WebRTCError, SignalingError, detectDevice,
   createConnectionStatus, createDeviceDiscovery, setWebrtcRef,
+  IndexedDBPinStore, createVerificationStatus,
 } from '@the9ines/bolt-transport-web';
-import type { TransferProgress, SignalMessage } from '@the9ines/bolt-transport-web';
+import type { TransferProgress, SignalMessage, VerificationInfo } from '@the9ines/bolt-transport-web';
+import { initIdentity } from '@/services/identity';
 import {
+  setVerificationState,
   getPhase, getGeneration, isCurrentGeneration,
   beginRequest, receiveRequest, beginConnecting,
   markConnected, resetSession,
@@ -13,6 +16,14 @@ import {
 
 let signalingRef: DualSignaling | null = null;
 let rtcServiceRef: WebRTCService | null = null;
+
+const pinStore = new IndexedDBPinStore();
+
+// Verification status UI component (SDK-provided)
+let verificationStatusUpdate: ((info: VerificationInfo) => void) | null = null;
+
+// Reject button (shown only for unverified state)
+let rejectBtnRef: HTMLButtonElement | null = null;
 
 function handleConnectionError(error: WebRTCError) {
   console.error(`[${error.name}]`, error.message, error.details);
@@ -26,10 +37,18 @@ function handleConnectionError(error: WebRTCError) {
 
   switch (error.name) {
     case 'ConnectionError':
-      title = 'Connection Failed';
-      description = device.isLinux
-        ? 'Connection failed. Please check your firewall settings.'
-        : 'Unable to connect to peer. Please try again.';
+      if (error.message.includes('key mismatch') || error.message.includes('TOFU violation')) {
+        title = 'Security Alert: Identity Mismatch';
+        description =
+          'This device\'s identity key has changed since your last connection. ' +
+          'The connection has been blocked for your safety. If this is unexpected, ' +
+          'the device may have been compromised or reinstalled.';
+      } else {
+        title = 'Connection Failed';
+        description = device.isLinux
+          ? 'Connection failed. Please check your firewall settings.'
+          : 'Unable to connect to peer. Please try again.';
+      }
       break;
     case 'SignalingError':
       title = 'Signaling Error';
@@ -73,6 +92,17 @@ function handleConnectionStateChange(state: RTCPeerConnectionState) {
   } else {
     // Non-connected state (disconnected, failed, etc.) — canonical reset
     resetSession();
+  }
+}
+
+function handleVerificationState(info: VerificationInfo) {
+  console.log('[TOFU] Verification state:', info.state, info.sasCode ? `SAS: ${info.sasCode}` : '');
+  setVerificationState(info);
+  verificationStatusUpdate?.(info);
+
+  // Show/hide reject button based on state
+  if (rejectBtnRef) {
+    rejectBtnRef.hidden = info.state !== 'unverified';
   }
 }
 
@@ -255,10 +285,49 @@ export function createPeerConnection(): HTMLElement {
   ));
   container.appendChild(touchWrap);
 
+  // ── Verification status UI ──────────────────────────────────────────
+  const verificationRow = document.createElement('div');
+  verificationRow.className = 'flex items-center gap-3';
+  verificationRow.hidden = true;
+
+  const verificationStatus = createVerificationStatus({
+    onMarkVerified: () => {
+      rtcServiceRef?.markPeerVerified();
+    },
+  });
+  verificationStatusUpdate = verificationStatus.update;
+  verificationRow.appendChild(verificationStatus.element);
+
+  // Reject button — visible only in unverified state
+  const rejectBtn = document.createElement('button');
+  rejectBtn.className =
+    'ml-auto px-2 py-0.5 text-xs rounded border border-red-400/30 ' +
+    'text-red-400 hover:bg-red-400/10 transition-colors';
+  rejectBtn.textContent = 'Reject';
+  rejectBtn.hidden = true;
+  rejectBtn.addEventListener('click', () => {
+    console.log('[TOFU] User rejected unverified peer');
+    disconnect();
+    showToast('Peer Rejected', 'Connection closed — peer identity was not verified');
+  });
+  rejectBtnRef = rejectBtn;
+  verificationRow.appendChild(rejectBtn);
+
+  container.appendChild(verificationRow);
+
+  // Show/hide verification row when connected
+  store.subscribe(() => {
+    const { isConnected } = store.getState();
+    verificationRow.hidden = !isConnected;
+  });
+
   // Initialize signaling + WebRTC
   const peerCode = generateSecurePeerCode();
   store.setState({ peerCode });
   console.log('[WEBRTC] Peer code:', peerCode);
+
+  // Start identity load in parallel with signaling connect
+  const identityPromise = initIdentity();
 
   // Dual signaling: local (LAN) + cloud (internet)
   const localUrl = import.meta.env.VITE_SIGNAL_URL || `ws://${window.location.hostname}:3001`;
@@ -300,14 +369,23 @@ export function createPeerConnection(): HTMLElement {
   // Register connection approval signal handler
   signaling.onSignal(handleApprovalSignal);
 
-  signaling.connect(peerCode, getDeviceName(), detectDeviceType()).then(() => {
+  signaling.connect(peerCode, getDeviceName(), detectDeviceType()).then(async () => {
     store.setState({ signalingConnected: true });
+
+    const identity = await identityPromise;
+    console.log('[IDENTITY] Local identity loaded');
+
     const rtcService = new WebRTCService(
       signaling,
       peerCode,
       handleFileReceive,
       handleConnectionError,
       handleReceiveProgress,
+      {
+        identityPublicKey: identity.publicKey,
+        pinStore,
+        onVerificationState: handleVerificationState,
+      },
     );
     rtcService.setConnectionStateHandler(handleConnectionStateChange);
     rtcServiceRef = rtcService;

@@ -11,4 +11,12 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  test: {
+    include: ["src/**/*.test.ts"],
+    server: {
+      deps: {
+        inline: ["@the9ines/localbolt-core"],
+      },
+    },
+  },
 });
