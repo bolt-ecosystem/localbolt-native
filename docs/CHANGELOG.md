@@ -4,6 +4,26 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.7-c6-hardening — 2026-03-05
+
+**Commit:** 3ff4625
+
+Add localbolt-core upgrade tooling + coverage threshold enforcement
+(C6/Q4). upgrade-localbolt-core.sh with check + upgrade modes.
+@vitest/coverage-v8 installed with thresholds (90/90/80/90
+lines/functions/branches/statements). CI wired to test:coverage.
+Baseline: 100% on tested files. Q4 closed.
+
+**Files changed:**
+- scripts/upgrade-localbolt-core.sh (new)
+- .gitignore (coverage/)
+- .github/workflows/ci.yml (test:coverage)
+- web/package.json (test:coverage, coverage-v8)
+- web/package-lock.json
+- web/vite.config.ts (coverage config)
+
+---
+
 ## localbolt-app-v1.2.6-c7-tofu-wiring — 2026-03-05
 
 **Commit:** e902186

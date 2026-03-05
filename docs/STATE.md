@@ -6,8 +6,8 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.6-c7-tofu-wiring
-- **Commit:** e902186
+- **Tag:** localbolt-app-v1.2.7-c6-hardening
+- **Commit:** 3ff4625
 - **Date:** 2026-03-05
 - **Tests:** 11 pass (2 test files)
 
@@ -21,13 +21,21 @@
 | tweetnacl | ^1.0.3 |
 | tweetnacl-util | ^0.15.1 |
 
-## C6 Guards
+## C6 Guards — DONE
 
 | Script | Purpose |
 |--------|---------|
 | scripts/check-core-version-pin.sh | Verify localbolt-core version pin |
 | scripts/check-core-single-install.sh | Verify single install in tree |
 | scripts/check-core-drift.sh | Detect declared vs resolved drift |
+| scripts/upgrade-localbolt-core.sh | Upgrade localbolt-core (check + upgrade modes) |
+
+## Q4 Coverage — DONE-VERIFIED
+
+- **Thresholds:** 90/90/80/90 (lines/functions/branches/statements)
+- **Baseline:** 100% on tested files
+- **CI:** `test:coverage` wired in `.github/workflows/ci.yml`
+- **Dev dep:** `@vitest/coverage-v8`
 
 ## Dev Dependencies
 
