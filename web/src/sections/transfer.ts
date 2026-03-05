@@ -1,5 +1,6 @@
 import { createPeerConnection } from '@/components/peer-connection';
 import { createFileUpload, store } from '@the9ines/bolt-transport-web';
+import { getVerificationState, onVerificationStateChange, isTransferAllowed } from '@the9ines/localbolt-core';
 
 export function createTransfer(): HTMLElement {
   const card = document.createElement('div');
@@ -32,7 +33,7 @@ export function createTransfer(): HTMLElement {
   const peerConnectionEl = createPeerConnection();
   content.appendChild(peerConnectionEl);
 
-  // File upload (shown when connected)
+  // File upload (shown when connected AND transfer is allowed)
   const fileUploadWrap = document.createElement('div');
   fileUploadWrap.className = 'animate-fade-in mt-6';
   fileUploadWrap.hidden = true;
@@ -41,10 +42,20 @@ export function createTransfer(): HTMLElement {
   fileUploadWrap.appendChild(fileUploadEl);
   content.appendChild(fileUploadWrap);
 
-  store.subscribe(() => {
+  // Gate: file transfer requires connection + allowed verification state.
+  // Policy (C-pre-2 stabilization):
+  //   verified  → transfer allowed
+  //   legacy    → transfer allowed (pre-SAS peer, encryption still active)
+  //   unverified → transfer BLOCKED (SAS pending — user must verify or reject)
+  //   mismatch  → transfer BLOCKED (fail-closed, connection should already be down)
+  function updateFileUploadVisibility() {
     const { isConnected } = store.getState();
-    fileUploadWrap.hidden = !isConnected;
-  });
+    const vState = getVerificationState().state;
+    fileUploadWrap.hidden = !isTransferAllowed(vState, isConnected);
+  }
+
+  store.subscribe(updateFileUploadVisibility);
+  onVerificationStateChange(updateFileUploadVisibility);
 
   card.append(gradientBr, gradientT, titleWrap, content);
   return card;
