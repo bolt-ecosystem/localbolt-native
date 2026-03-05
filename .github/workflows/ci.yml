@@ -68,14 +68,22 @@ jobs:
       - name: Transport version pin guard
         working-directory: .
         run: bash scripts/check-transport-version-pin.sh
+      - name: Core version pin guard
+        working-directory: .
+        run: bash scripts/check-core-version-pin.sh
       - run: npm ci
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Transport single-install guard
         working-directory: .
         run: bash scripts/check-transport-single-install.sh
+      - name: Core single-install guard
+        working-directory: .
+        run: bash scripts/check-core-single-install.sh
       - name: Web tests
         run: npm test
       - run: npm run build
       - name: Transport drift guard
         run: bash ../scripts/check-transport-drift.sh src
+      - name: Core drift guard
+        run: bash ../scripts/check-core-drift.sh src
