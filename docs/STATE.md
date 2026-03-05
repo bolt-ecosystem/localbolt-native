@@ -6,9 +6,10 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.5-c6-core-guards
-- **Commit:** d1761e9
+- **Tag:** localbolt-app-v1.2.6-c7-tofu-wiring
+- **Commit:** e902186
 - **Date:** 2026-03-05
+- **Tests:** 11 pass (2 test files)
 
 ## Dependencies (web/package.json)
 

@@ -4,6 +4,43 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.6-c7-tofu-wiring — 2026-03-05
+
+**Commit:** e902186
+
+Wire identity and TOFU verification flow (Batch 4A) and enforce core
+guard scripts in CI (Batch 4B).
+
+**4A — Identity/TOFU wiring (5552f37):**
+- Identity keypair persistence via IndexedDBIdentityStore + initIdentity()
+- TOFU pinning wired through localbolt-core onVerificationState callback
+- Generation-guarded stale callback rejection across disconnect/reconnect
+- Mismatch fail-closed with security toast
+- Verification states (unverified, verified) now reachable from UI
+- 10 new integration tests (tofu-integration.test.ts): identity wiring,
+  verification state integration, mismatch fail-closed, generation guard
+  race, reject flow
+- 11 tests pass. Clean build.
+
+**4B — CI guard wiring (e902186):**
+- Core version pin guard (before npm ci)
+- Core single-install guard (after npm ci)
+- Core drift guard (after build)
+- Mirrors transport guard placement in CI workflow
+
+No SDK or subtree edits.
+
+**Files changed:**
+- web/src/services/identity.ts (new)
+- web/src/components/peer-connection.ts
+- web/src/components/__tests__/tofu-integration.test.ts (new)
+- web/package.json
+- web/package-lock.json
+- web/vite.config.ts
+- .github/workflows/ci.yml
+
+---
+
 ## localbolt-app-v1.2.5-c6-core-guards — 2026-03-05
 
 **Commit:** d1761e9
