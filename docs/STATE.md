@@ -6,18 +6,27 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.0
-- **Commit:** 90584bf
-- **Date:** 2026-02-24
+- **Tag:** localbolt-app-v1.2.5-c6-core-guards
+- **Commit:** d1761e9
+- **Date:** 2026-03-05
 
 ## Dependencies (web/package.json)
 
 | Package | Version |
 |---------|---------|
-| @the9ines/bolt-core | 0.4.0 |
-| @the9ines/bolt-transport-web | 0.6.0 |
+| @the9ines/bolt-core | 0.5.0 |
+| @the9ines/bolt-transport-web | 0.6.2 |
+| @the9ines/localbolt-core | 0.1.0 |
 | tweetnacl | ^1.0.3 |
 | tweetnacl-util | ^0.15.1 |
+
+## C6 Guards
+
+| Script | Purpose |
+|--------|---------|
+| scripts/check-core-version-pin.sh | Verify localbolt-core version pin |
+| scripts/check-core-single-install.sh | Verify single install in tree |
+| scripts/check-core-drift.sh | Detect declared vs resolved drift |
 
 ## Dev Dependencies
 
@@ -36,4 +45,5 @@
 - **Branch:** main
 - **Status:** Active
 - **Build:** Passing (vite)
-- **Tests:** No test suite
+- **Tests:** 1 test pass
+- **src-tauri:** Unchanged (not yet consuming localbolt-core)

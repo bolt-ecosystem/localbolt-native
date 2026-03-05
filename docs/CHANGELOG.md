@@ -4,6 +4,36 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.5-c6-core-guards — 2026-03-05
+
+**Commit:** d1761e9
+
+Add C6 enforcement guards for localbolt-core (version pin, single-install,
+drift). Three shell scripts verify that @the9ines/localbolt-core remains at
+the pinned version, is installed exactly once in the dependency tree, and that
+no drift exists between the declared and resolved version.
+
+- Files changed:
+  - `scripts/check-core-version-pin.sh`
+  - `scripts/check-core-single-install.sh`
+  - `scripts/check-core-drift.sh`
+
+## localbolt-app-v1.2.4-c5-localbolt-core — 2026-03-05
+
+**Commit:** 0d267b8
+
+Migrate web layer to @the9ines/localbolt-core orchestration (C5). Replace
+ad-hoc store transitions with session phase guards, generation-guarded
+callbacks, canonical resetSession(), and isTransferAllowed() policy. Deps:
+bolt-core 0.5.0, bolt-transport-web 0.6.2, localbolt-core 0.1.0. Identity
+wiring not connected (legacy mode). src-tauri untouched. 1 test pass.
+
+- Files changed:
+  - `web/package.json`
+  - `web/package-lock.json`
+  - `web/src/components/peer-connection.ts`
+  - `web/src/sections/transfer.ts`
+
 ## localbolt-app-v1.2.1 — 2026-02-24
 
 **Commit:** c541b36
