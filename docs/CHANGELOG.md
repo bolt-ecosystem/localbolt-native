@@ -4,6 +4,22 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.9-d5-registry-guards — 2026-03-06
+
+**Commit:** 93afc2c
+
+D5: registry/auth regression guards + CI cleanup removing GitHub Packages auth.
+Two new CI guard scripts prevent regression to npm.pkg.github.com for @the9ines
+packages. CI workflow cleaned of GitHub Packages auth (registry-url, NODE_AUTH_TOKEN,
+packages:read permission).
+
+**Files changed:**
+- scripts/check-registry-mapping.sh (new)
+- scripts/check-lockfile-registry.sh (new)
+- .github/workflows/ci.yml
+
+---
+
 ## localbolt-app-v1.2.8-d4-npmjs-cutover — 2026-03-05
 
 **Commit:** 55c3e17

@@ -6,9 +6,9 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.8-d4-npmjs-cutover
-- **Commit:** 55c3e17
-- **Date:** 2026-03-05
+- **Tag:** localbolt-app-v1.2.9-d5-registry-guards
+- **Commit:** 93afc2c
+- **Date:** 2026-03-06
 - **Tests:** 11 pass (2 test files)
 
 ## Dependencies (web/package.json)
