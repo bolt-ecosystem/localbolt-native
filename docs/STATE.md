@@ -6,18 +6,18 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.7-c6-hardening
-- **Commit:** 3ff4625
+- **Tag:** localbolt-app-v1.2.8-d4-npmjs-cutover
+- **Commit:** 55c3e17
 - **Date:** 2026-03-05
 - **Tests:** 11 pass (2 test files)
 
 ## Dependencies (web/package.json)
 
-| Package | Version |
-|---------|---------|
-| @the9ines/bolt-core | 0.5.0 |
-| @the9ines/bolt-transport-web | 0.6.2 |
-| @the9ines/localbolt-core | 0.1.0 |
+| Package | Version | Registry |
+|---------|---------|----------|
+| @the9ines/bolt-core | 0.5.1 | npmjs.org |
+| @the9ines/bolt-transport-web | 0.6.4 | npmjs.org |
+| @the9ines/localbolt-core | 0.1.2 | npmjs.org |
 | tweetnacl | ^1.0.3 |
 | tweetnacl-util | ^0.15.1 |
 
