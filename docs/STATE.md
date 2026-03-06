@@ -6,10 +6,10 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.9-d5-registry-guards
-- **Commit:** 93afc2c
+- **Tag:** localbolt-app-v1.2.10-s-stream-r1-r1.4-security-test-lift
+- **Commit:** 71c3181
 - **Date:** 2026-03-06
-- **Tests:** 11 pass (2 test files)
+- **Tests:** 32 pass (3 test files)
 
 ## Dependencies (web/package.json)
 

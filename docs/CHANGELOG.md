@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.10-s-stream-r1-r1.4-security-test-lift — 2026-03-06
+
+**Commit:** 71c3181
+
+R1-4 security-focused product test lift — 21 security-session-integrity tests
+covering identity/trust wiring in connect/reconnect paths, stale generation
+callback rejection across timing patterns, transfer gating under verification
+transitions, and no trust leakage across sessions. Baseline 11 → 32 tests.
+
+**Files changed:**
+- web/src/components/__tests__/security-session-integrity.test.ts (new, 416 lines)
+
+---
+
 ## localbolt-app-v1.2.9-d5-registry-guards — 2026-03-06
 
 **Commit:** 93afc2c
