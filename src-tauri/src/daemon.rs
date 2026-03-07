@@ -7,7 +7,10 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use tauri::Emitter;
+
 use crate::daemon_log::StderrBuffer;
+use crate::ipc_bridge::IpcBridge;
 use crate::ipc_client::{self, ReadinessResult, DAEMON_SOCKET_PATH};
 use crate::watchdog::{Watchdog, WatchdogState, STARTUP_TIMEOUT};
 
@@ -17,10 +20,19 @@ const PID_FILE_PATH: &str = "/tmp/bolt-daemon.pid";
 /// App version used for IPC handshake.
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Watchdog state payload emitted to frontend.
+#[derive(serde::Serialize, Clone)]
+pub struct WatchdogStateEvent {
+    pub state: WatchdogState,
+    pub retry_count: u32,
+}
+
 /// Shared daemon manager state.
 pub struct DaemonManager {
     pub watchdog: Arc<Mutex<Watchdog>>,
     pub stderr_buffer: StderrBuffer,
+    pub bridge: Arc<IpcBridge>,
+    app_handle: Option<tauri::AppHandle>,
     child_pid: Arc<Mutex<Option<u32>>>,
     shutdown_flag: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -30,8 +42,27 @@ impl DaemonManager {
         Self {
             watchdog: Arc::new(Mutex::new(Watchdog::new())),
             stderr_buffer: StderrBuffer::with_default_capacity(),
+            bridge: Arc::new(IpcBridge::new()),
+            app_handle: None,
             child_pid: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    /// Set the Tauri AppHandle for event emission (called from setup).
+    pub fn set_app_handle(&mut self, handle: tauri::AppHandle) {
+        self.app_handle = Some(handle);
+    }
+
+    /// Emit watchdog state change to frontend.
+    fn emit_watchdog_state(&self) {
+        if let Some(ref handle) = self.app_handle {
+            let watchdog = self.watchdog.lock().unwrap();
+            let event = WatchdogStateEvent {
+                state: watchdog.state(),
+                retry_count: watchdog.retry_count(),
+            };
+            let _ = handle.emit("daemon://watchdog-state", &event);
         }
     }
 
@@ -97,6 +128,7 @@ impl DaemonManager {
                 loop {
                     if std::time::Instant::now() >= deadline {
                         let delay = self.watchdog.lock().unwrap().on_startup_timeout();
+                        self.emit_watchdog_state();
                         if let Some(d) = delay {
                             std::thread::sleep(d);
                         }
@@ -114,11 +146,27 @@ impl DaemonManager {
                                 "[WATCHDOG] readiness confirmed: daemon v{daemon_version}"
                             );
                             self.watchdog.lock().unwrap().on_daemon_ready();
+                            self.emit_watchdog_state();
+
+                            // Start persistent IPC bridge for event forwarding
+                            if let Some(ref handle) = self.app_handle {
+                                match self.bridge.start(socket_path, APP_VERSION, handle.clone()) {
+                                    Ok(()) => {
+                                        tracing::info!("[IPC_BRIDGE] started successfully");
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "[IPC_BRIDGE] failed to start: {e} (readiness probe passed but bridge failed)"
+                                        );
+                                    }
+                                }
+                            }
                             return;
                         }
                         ReadinessResult::Incompatible { daemon_version } => {
                             tracing::warn!("[WATCHDOG] daemon incompatible: v{daemon_version}");
                             self.watchdog.lock().unwrap().on_version_incompatible();
+                            self.emit_watchdog_state();
                             return;
                         }
                         ReadinessResult::Failed(reason) => {
@@ -130,6 +178,7 @@ impl DaemonManager {
             }
             Err(reason) => {
                 self.watchdog.lock().unwrap().on_spawn_failure(&reason);
+                self.emit_watchdog_state();
             }
         }
     }
@@ -236,7 +285,11 @@ impl DaemonManager {
                 tracing::warn!("[WATCHDOG] daemon exited (pid={pid}, code={exit_code:?})");
                 *self.child_pid.lock().unwrap() = None;
 
+                // Daemon exited — shutdown bridge
+                self.bridge.shutdown();
+
                 let delay = self.watchdog.lock().unwrap().on_daemon_exit(exit_code);
+                self.emit_watchdog_state();
                 if let Some(d) = delay {
                     // Write crash snapshot
                     let retry_count = self.watchdog.lock().unwrap().retry_count();
@@ -363,6 +416,7 @@ impl DaemonManager {
 
     /// Initiate clean daemon shutdown (SIGTERM -> 5s grace -> SIGKILL).
     pub fn shutdown(&self) {
+        self.bridge.shutdown();
         self.shutdown_flag
             .store(true, std::sync::atomic::Ordering::Relaxed);
 

@@ -1,9 +1,13 @@
 import { createHeader } from '@/sections/header';
 import { createTransfer } from '@/sections/transfer';
 import { createFooter } from '@/sections/footer';
+import { initDaemonService } from '@/services/daemon';
 
 export function createApp(root: HTMLElement) {
   root.innerHTML = '';
+
+  // Initialize daemon IPC service (non-blocking, degrades outside Tauri)
+  initDaemonService();
 
   const wrapper = document.createElement('div');
   wrapper.className = 'min-h-screen bg-dark text-white flex flex-col';

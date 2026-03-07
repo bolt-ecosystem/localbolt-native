@@ -1,6 +1,7 @@
 mod commands;
 mod daemon;
 mod daemon_log;
+mod ipc_bridge;
 mod ipc_client;
 mod ipc_types;
 mod watchdog;
@@ -10,7 +11,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
-use crate::daemon::DaemonManager;
+use daemon::DaemonManager;
+use tauri::Manager;
 
 /// Spawn the embedded signaling server on a background thread.
 ///
@@ -40,23 +42,30 @@ pub fn run() {
     // Start signal server before the UI (unchanged from pre-N6)
     start_embedded_signal_server();
 
-    // Initialize daemon manager and start lifecycle
-    let manager = Arc::new(DaemonManager::new());
-    manager.start();
-
-    let manager_for_exit = Arc::clone(&manager);
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(manager)
+        .setup(|app| {
+            // Initialize daemon manager with AppHandle for event emission
+            let mut manager = DaemonManager::new();
+            manager.set_app_handle(app.handle().clone());
+            let manager = Arc::new(manager);
+            manager.start();
+            app.manage(manager);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_watchdog_state,
             commands::restart_daemon,
+            commands::send_pairing_decision,
+            commands::send_transfer_decision,
             commands::export_support_bundle,
         ])
-        .on_window_event(move |_window, event| {
+        .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                manager_for_exit.shutdown();
+                if let Some(mgr) = window.try_state::<Arc<DaemonManager>>() {
+                    let mgr: &Arc<DaemonManager> = &mgr;
+                    mgr.shutdown();
+                }
             }
         })
         .run(tauri::generate_context!())

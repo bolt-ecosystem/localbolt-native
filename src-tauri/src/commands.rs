@@ -8,6 +8,7 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::daemon::DaemonManager;
+use crate::ipc_types::{IpcMessage, PairingDecisionPayload, TransferIncomingDecisionPayload};
 use crate::watchdog::WatchdogState;
 
 /// Watchdog state response for the frontend.
@@ -38,12 +39,50 @@ pub fn restart_daemon(manager: tauri::State<'_, Arc<DaemonManager>>) -> Result<S
     }
 }
 
-/// Export support bundle (stub — NOT_IMPLEMENTED in N6-A1).
+/// Send a pairing decision to the daemon via IPC bridge.
+#[tauri::command]
+pub fn send_pairing_decision(
+    manager: tauri::State<'_, Arc<DaemonManager>>,
+    payload: PairingDecisionPayload,
+) -> Result<String, String> {
+    let msg = IpcMessage::new_decision(
+        "pairing.decision",
+        serde_json::to_value(&payload).map_err(|e| format!("serialize: {e}"))?,
+    );
+    manager.bridge.send_decision(msg)?;
+    tracing::info!(
+        "[IPC_BRIDGE] sent pairing.decision for {} -> {:?}",
+        payload.request_id,
+        payload.decision
+    );
+    Ok("decision sent".to_string())
+}
+
+/// Send a transfer incoming decision to the daemon via IPC bridge.
+#[tauri::command]
+pub fn send_transfer_decision(
+    manager: tauri::State<'_, Arc<DaemonManager>>,
+    payload: TransferIncomingDecisionPayload,
+) -> Result<String, String> {
+    let msg = IpcMessage::new_decision(
+        "transfer.incoming.decision",
+        serde_json::to_value(&payload).map_err(|e| format!("serialize: {e}"))?,
+    );
+    manager.bridge.send_decision(msg)?;
+    tracing::info!(
+        "[IPC_BRIDGE] sent transfer.incoming.decision for {} -> {:?}",
+        payload.request_id,
+        payload.decision
+    );
+    Ok("decision sent".to_string())
+}
+
+/// Export support bundle (stub — NOT_IMPLEMENTED, deferred to N6-B).
 #[tauri::command]
 pub fn export_support_bundle(
     _manager: tauri::State<'_, Arc<DaemonManager>>,
 ) -> Result<String, String> {
-    Err("NOT_IMPLEMENTED: support bundle export will be available in N6-A2".to_string())
+    Err("NOT_IMPLEMENTED: support bundle export deferred to N6-B".to_string())
 }
 
 #[cfg(test)]
@@ -68,5 +107,37 @@ mod tests {
         // but we can verify the function signature and error message exist.
         // The actual integration is tested via the tauri command registration.
         let _ = mgr; // Ensure it compiles
+    }
+
+    #[test]
+    fn pairing_decision_payload_serializes() {
+        use crate::ipc_types::Decision;
+        let p = PairingDecisionPayload {
+            request_id: "evt-5".into(),
+            decision: Decision::AllowOnce,
+            note: None,
+        };
+        let msg = IpcMessage::new_decision("pairing.decision", serde_json::to_value(&p).unwrap());
+        assert_eq!(msg.msg_type, "pairing.decision");
+        let line = msg.to_ndjson().unwrap();
+        assert!(line.contains("allow_once"));
+    }
+
+    #[test]
+    fn transfer_decision_payload_serializes() {
+        use crate::ipc_types::Decision;
+        let p = TransferIncomingDecisionPayload {
+            request_id: "evt-7".into(),
+            decision: Decision::DenyOnce,
+            note: Some("test".into()),
+        };
+        let msg = IpcMessage::new_decision(
+            "transfer.incoming.decision",
+            serde_json::to_value(&p).unwrap(),
+        );
+        assert_eq!(msg.msg_type, "transfer.incoming.decision");
+        let line = msg.to_ndjson().unwrap();
+        assert!(line.contains("deny_once"));
+        assert!(line.contains("test"));
     }
 }

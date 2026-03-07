@@ -12,6 +12,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
     "@the9ines/bolt-core": "0.5.1",
     "@the9ines/bolt-transport-web": "0.6.4",
     "@the9ines/localbolt-core": "0.1.2",
