@@ -4,3 +4,4 @@ target/
 coverage/
 .DS_Store
 *.log
+src-tauri/bin/

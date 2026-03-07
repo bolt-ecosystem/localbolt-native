@@ -1,6 +1,16 @@
+mod commands;
+mod daemon;
+mod daemon_log;
+mod ipc_client;
+mod ipc_types;
+mod watchdog;
+
 use bolt_rendezvous::SignalingServer;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
+
+use crate::daemon::DaemonManager;
 
 /// Spawn the embedded signaling server on a background thread.
 ///
@@ -27,11 +37,28 @@ pub fn run() {
         )
         .init();
 
-    // Start signal server before the UI
+    // Start signal server before the UI (unchanged from pre-N6)
     start_embedded_signal_server();
+
+    // Initialize daemon manager and start lifecycle
+    let manager = Arc::new(DaemonManager::new());
+    manager.start();
+
+    let manager_for_exit = Arc::clone(&manager);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(manager)
+        .invoke_handler(tauri::generate_handler![
+            commands::get_watchdog_state,
+            commands::restart_daemon,
+            commands::export_support_bundle,
+        ])
+        .on_window_event(move |_window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                manager_for_exit.shutdown();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
