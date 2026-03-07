@@ -4,6 +4,37 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.11-n6a-sidecar-lifecycle — 2026-03-07
+
+**Commit:** 0c218bb
+
+N-STREAM-1 / N6-A1: daemon sidecar lifecycle and watchdog core.
+
+- Watchdog state machine (5 states: starting/ready/restarting/degraded/incompatible)
+  with 1s/3s/10s backoff, 3 max retries, 60s reset window
+- Daemon manager: spawn, stale socket/PID cleanup, SIGTERM/SIGKILL shutdown
+- IPC readiness probe: NDJSON version.handshake + daemon.status per N2 contract
+- stderr ring buffer (1000 lines) with crash snapshot persistence
+- Tauri commands: get_watchdog_state, restart_daemon, export_support_bundle (stub)
+- App lifecycle hooks: daemon start on launch, shutdown on window close
+- 37 new Rust tests. 32 existing web tests unchanged.
+
+No frontend/UI changes (deferred to N6-A2). No subtree modifications.
+
+**Files changed:**
+- .gitignore
+- src-tauri/Cargo.lock
+- src-tauri/Cargo.toml
+- src-tauri/src/lib.rs
+- src-tauri/src/commands.rs (new)
+- src-tauri/src/daemon.rs (new)
+- src-tauri/src/daemon_log.rs (new)
+- src-tauri/src/ipc_client.rs (new)
+- src-tauri/src/ipc_types.rs (new)
+- src-tauri/src/watchdog.rs (new)
+
+---
+
 ## localbolt-app-v1.2.10-s-stream-r1-r1.4-security-test-lift — 2026-03-06
 
 **Commit:** 71c3181

@@ -6,10 +6,10 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.10-s-stream-r1-r1.4-security-test-lift
-- **Commit:** 71c3181
-- **Date:** 2026-03-06
-- **Tests:** 32 pass (3 test files)
+- **Tag:** localbolt-app-v1.2.11-n6a-sidecar-lifecycle
+- **Commit:** 0c218bb
+- **Date:** 2026-03-07
+- **Tests:** 32 web (3 files) + 37 Rust (6 modules) = 69 total
 
 ## Dependencies (web/package.json)
 
@@ -54,5 +54,5 @@
 - **Branch:** main
 - **Status:** Active
 - **Build:** Passing (vite)
-- **Tests:** 1 test pass
-- **src-tauri:** Unchanged (not yet consuming localbolt-core)
+- **Tests:** 69 pass (32 web + 37 Rust)
+- **src-tauri:** N6-A1 daemon sidecar lifecycle (watchdog, IPC readiness, stderr capture)
