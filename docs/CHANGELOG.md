@@ -4,6 +4,48 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.12-n6a2-ipc-ui-gating — 2026-03-07
+
+**Commit:** 8f4aea9
+
+N-STREAM-1 / N6-A2: IPC bridge, frontend readiness gating, and daemon UX integration.
+
+- Persistent IPC bridge (ipc_bridge.rs): connects after readiness, forwards
+  daemon.status / pairing.request / transfer.incoming.request events to frontend,
+  relays pairing.decision / transfer.incoming.decision back to daemon
+- IPC types: PairingRequestPayload, TransferIncomingRequestPayload, Decision enum,
+  PairingDecisionPayload, TransferIncomingDecisionPayload
+- Tauri commands: send_pairing_decision, send_transfer_decision
+- DaemonManager emits watchdog state changes via Tauri event bus
+- Frontend daemon service (daemon.ts): subscribe to Tauri events, command wrappers,
+  graceful non-Tauri degradation, pending request state management
+- Header: dual status indicators (signaling + daemon watchdog, 5-state rendering)
+- Transfer: readiness gating (fail-closed when daemon not ready), degraded banner
+  with restart action, incompatible banner with update message
+- Support bundle stub updated: deferred to N6-B, returns NOT_IMPLEMENTED
+- @tauri-apps/api added as frontend dependency for Tauri IPC
+- 48 Rust tests (11 new in ipc_bridge, ipc_types, commands)
+- 52 web tests (20 new daemon service tests with mocked Tauri API)
+- Coverage: 91/94/85/90 (above 90/90/80/90 thresholds)
+
+No subtree modifications. No daemon protocol changes.
+
+**Files changed:**
+- src-tauri/src/ipc_bridge.rs (new)
+- src-tauri/src/ipc_types.rs
+- src-tauri/src/commands.rs
+- src-tauri/src/daemon.rs
+- src-tauri/src/lib.rs
+- web/src/services/daemon.ts (new)
+- web/src/services/__tests__/daemon.test.ts (new)
+- web/src/sections/header.ts
+- web/src/sections/transfer.ts
+- web/src/app.ts
+- web/package.json
+- web/package-lock.json
+
+---
+
 ## localbolt-app-v1.2.11-n6a-sidecar-lifecycle — 2026-03-07
 
 **Commit:** 0c218bb

@@ -6,15 +6,16 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.11-n6a-sidecar-lifecycle
-- **Commit:** 0c218bb
+- **Tag:** localbolt-app-v1.2.12-n6a2-ipc-ui-gating
+- **Commit:** 8f4aea9
 - **Date:** 2026-03-07
-- **Tests:** 32 web (3 files) + 37 Rust (6 modules) = 69 total
+- **Tests:** 52 web (4 files) + 48 Rust (7 modules) = 100 total
 
 ## Dependencies (web/package.json)
 
 | Package | Version | Registry |
 |---------|---------|----------|
+| @tauri-apps/api | ^2.0.0 | npmjs.org |
 | @the9ines/bolt-core | 0.5.1 | npmjs.org |
 | @the9ines/bolt-transport-web | 0.6.4 | npmjs.org |
 | @the9ines/localbolt-core | 0.1.2 | npmjs.org |
@@ -54,5 +55,6 @@
 - **Branch:** main
 - **Status:** Active
 - **Build:** Passing (vite)
-- **Tests:** 69 pass (32 web + 37 Rust)
-- **src-tauri:** N6-A1 daemon sidecar lifecycle (watchdog, IPC readiness, stderr capture)
+- **Tests:** 100 pass (52 web + 48 Rust)
+- **src-tauri:** N6-A2 IPC bridge + event forwarding + decision relay
+- **web:** daemon service, readiness gating, degraded/incompatible UX
