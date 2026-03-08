@@ -11,11 +11,18 @@
 
 export type WatchdogState = 'starting' | 'ready' | 'restarting' | 'degraded' | 'incompatible';
 
+export type SignalStatus = 'unknown' | 'active' | 'degraded' | 'offline';
+
 export type Decision = 'allow_once' | 'allow_always' | 'deny_once' | 'deny_always';
 
 export interface WatchdogStateEvent {
   state: WatchdogState;
   retry_count: number;
+}
+
+export interface SignalStatusEvent {
+  status: SignalStatus;
+  consecutive_failures: number;
 }
 
 export interface DaemonStatusUpdate {
@@ -45,6 +52,7 @@ export interface TransferIncomingRequest {
 
 export interface DaemonState {
   watchdog: WatchdogState;
+  signalStatus: SignalStatus;
   retryCount: number;
   connectedPeers: number;
   daemonVersion: string | null;
@@ -70,6 +78,7 @@ function isTauri(): boolean {
 
 let currentState: DaemonState = {
   watchdog: 'starting',
+  signalStatus: 'unknown',
   retryCount: 0,
   connectedPeers: 0,
   daemonVersion: null,
@@ -166,6 +175,20 @@ export async function initDaemonService(): Promise<void> {
       console.warn('[DAEMON] IPC bridge disconnected');
     });
     unlisten.push(u5);
+
+    // Subscribe to signal server health status (N8 observability)
+    const u6 = await listen<SignalStatusEvent>('signal://status', (event) => {
+      setState({ signalStatus: event.payload.status });
+    });
+    unlisten.push(u6);
+
+    // Fetch initial signal status
+    try {
+      const signalInitial = await invoke<{ status: SignalStatus }>('get_signal_status');
+      setState({ signalStatus: signalInitial.status });
+    } catch (e) {
+      console.warn('[DAEMON] failed to get initial signal status:', e);
+    }
 
     console.log('[DAEMON] service initialized');
   } catch (e) {

@@ -82,6 +82,11 @@ impl DaemonManager {
         self.spawn_count.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Get a clone of the shutdown flag (shared with signal monitor).
+    pub fn shutdown_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        Arc::clone(&self.shutdown_flag)
+    }
+
     /// Set the Tauri AppHandle for event emission (called from setup).
     pub fn set_app_handle(&mut self, handle: tauri::AppHandle) {
         self.app_handle = Some(handle);

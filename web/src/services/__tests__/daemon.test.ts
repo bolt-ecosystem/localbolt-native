@@ -21,6 +21,7 @@ describe('daemon service — non-Tauri mode', () => {
   it('getDaemonState returns initial state', () => {
     const state = daemonModule.getDaemonState();
     expect(state.watchdog).toBe('starting');
+    expect(state.signalStatus).toBe('unknown');
     expect(state.retryCount).toBe(0);
     expect(state.connectedPeers).toBe(0);
     expect(state.daemonVersion).toBeNull();
@@ -89,7 +90,15 @@ describe('daemon service — Tauri mode with mocked API', () => {
     mockUnlisten.mockReset();
 
     mockListen.mockResolvedValue(mockUnlisten);
-    mockInvoke.mockResolvedValue({ state: 'ready', retry_count: 0 });
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_watchdog_state') {
+        return Promise.resolve({ state: 'ready', retry_count: 0 });
+      }
+      if (cmd === 'get_signal_status') {
+        return Promise.resolve({ status: 'active' });
+      }
+      return Promise.resolve(null);
+    });
 
     vi.doMock('@tauri-apps/api/event', () => ({
       listen: mockListen,
@@ -104,23 +113,26 @@ describe('daemon service — Tauri mode with mocked API', () => {
   it('initDaemonService fetches initial state and subscribes to events', async () => {
     await daemonModule.initDaemonService();
 
-    // Should have called invoke for initial state
+    // Should have called invoke for initial watchdog + signal status
     expect(mockInvoke).toHaveBeenCalledWith('get_watchdog_state');
+    expect(mockInvoke).toHaveBeenCalledWith('get_signal_status');
 
-    // Should have subscribed to 5 events
-    expect(mockListen).toHaveBeenCalledTimes(5);
+    // Should have subscribed to 6 events (5 daemon + 1 signal)
+    expect(mockListen).toHaveBeenCalledTimes(6);
     const eventNames = mockListen.mock.calls.map((c: any[]) => c[0]);
     expect(eventNames).toContain('daemon://watchdog-state');
     expect(eventNames).toContain('daemon://status-update');
     expect(eventNames).toContain('daemon://pairing-request');
     expect(eventNames).toContain('daemon://transfer-request');
     expect(eventNames).toContain('daemon://bridge-disconnected');
+    expect(eventNames).toContain('signal://status');
   });
 
   it('initial state is set from invoke result', async () => {
     await daemonModule.initDaemonService();
     const state = daemonModule.getDaemonState();
     expect(state.watchdog).toBe('ready');
+    expect(state.signalStatus).toBe('active');
     expect(daemonModule.isDaemonReady()).toBe(true);
   });
 
@@ -136,6 +148,50 @@ describe('daemon service — Tauri mode with mocked API', () => {
     expect(state.watchdog).toBe('degraded');
     expect(state.retryCount).toBe(3);
     expect(daemonModule.isDaemonReady()).toBe(false);
+  });
+
+  it('signal status event updates signalStatus', async () => {
+    await daemonModule.initDaemonService();
+
+    const signalCall = mockListen.mock.calls.find((c: any[]) => c[0] === 'signal://status');
+    const handler = signalCall[1];
+
+    handler({ payload: { status: 'degraded', consecutive_failures: 2 } });
+    const state = daemonModule.getDaemonState();
+    expect(state.signalStatus).toBe('degraded');
+  });
+
+  it('signal status transitions through all states', async () => {
+    await daemonModule.initDaemonService();
+
+    const signalCall = mockListen.mock.calls.find((c: any[]) => c[0] === 'signal://status');
+    const handler = signalCall[1];
+
+    handler({ payload: { status: 'degraded', consecutive_failures: 1 } });
+    expect(daemonModule.getDaemonState().signalStatus).toBe('degraded');
+
+    handler({ payload: { status: 'offline', consecutive_failures: 3 } });
+    expect(daemonModule.getDaemonState().signalStatus).toBe('offline');
+
+    handler({ payload: { status: 'active', consecutive_failures: 0 } });
+    expect(daemonModule.getDaemonState().signalStatus).toBe('active');
+
+    handler({ payload: { status: 'unknown', consecutive_failures: 0 } });
+    expect(daemonModule.getDaemonState().signalStatus).toBe('unknown');
+  });
+
+  it('subscriber receives signal status updates', async () => {
+    await daemonModule.initDaemonService();
+
+    const fn = vi.fn();
+    daemonModule.subscribeDaemonState(fn);
+    fn.mockClear();
+
+    const signalCall = mockListen.mock.calls.find((c: any[]) => c[0] === 'signal://status');
+    signalCall[1]({ payload: { status: 'offline', consecutive_failures: 3 } });
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn.mock.calls[0][0].signalStatus).toBe('offline');
   });
 
   it('daemon.status event updates connected peers', async () => {
@@ -267,5 +323,12 @@ describe('daemon service — Tauri mode with mocked API', () => {
     mockInvoke.mockRejectedValue(new Error('command not found'));
     // Should not throw
     await expect(daemonModule.initDaemonService()).resolves.not.toThrow();
+  });
+});
+
+describe('unified status computation', () => {
+  it('is exported from header module', async () => {
+    const { computeUnifiedStatus } = await import('@/sections/header');
+    expect(typeof computeUnifiedStatus).toBe('function');
   });
 });

@@ -6,6 +6,7 @@ mod ipc_client;
 mod ipc_transport;
 mod ipc_types;
 mod platform;
+mod signal_monitor;
 mod watchdog;
 
 use bolt_rendezvous::SignalingServer;
@@ -50,13 +51,19 @@ pub fn run() {
             // Initialize daemon manager with AppHandle for event emission
             let mut manager = DaemonManager::new();
             manager.set_app_handle(app.handle().clone());
+            let shutdown_flag = manager.shutdown_flag();
             let manager = Arc::new(manager);
             manager.start();
             app.manage(manager);
+
+            // Start signal health monitor (N8 — observability only)
+            signal_monitor::start_signal_monitor(app.handle().clone(), shutdown_flag);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_watchdog_state,
+            commands::get_signal_status,
             commands::restart_daemon,
             commands::send_pairing_decision,
             commands::send_transfer_decision,

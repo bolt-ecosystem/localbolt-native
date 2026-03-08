@@ -10,6 +10,7 @@ use serde::Serialize;
 use crate::daemon::DaemonManager;
 use crate::ipc_types::{IpcMessage, PairingDecisionPayload, TransferIncomingDecisionPayload};
 use crate::platform;
+use crate::signal_monitor::{self, SignalStatus};
 use crate::watchdog::WatchdogState;
 
 /// Watchdog state response for the frontend.
@@ -37,6 +38,25 @@ pub fn restart_daemon(manager: tauri::State<'_, Arc<DaemonManager>>) -> Result<S
         Ok("restart initiated".to_string())
     } else {
         Err("restart not available in current state".to_string())
+    }
+}
+
+/// Signal status response for the frontend.
+#[derive(Serialize)]
+pub struct SignalStatusResponse {
+    pub status: SignalStatus,
+}
+
+/// Get current signal server health status via a synchronous probe.
+#[tauri::command]
+pub fn get_signal_status() -> SignalStatusResponse {
+    let healthy = signal_monitor::probe_signal_health();
+    SignalStatusResponse {
+        status: if healthy {
+            SignalStatus::Active
+        } else {
+            SignalStatus::Offline
+        },
     }
 }
 
@@ -88,6 +108,7 @@ pub struct SupportBundle {
     pub output_path: String,
     pub app_version: String,
     pub daemon_version: Option<String>,
+    pub signal_status: SignalStatus,
     pub platform: PlatformMeta,
     pub ipc_config: IpcConfig,
     pub watchdog: WatchdogSnapshot,
@@ -181,6 +202,13 @@ fn build_support_bundle(manager: &DaemonManager) -> Result<SupportBundle, String
     // Daemon version
     let daemon_version = manager.daemon_version();
 
+    // Signal server status (point-in-time probe)
+    let signal_status = if signal_monitor::probe_signal_health() {
+        SignalStatus::Active
+    } else {
+        SignalStatus::Offline
+    };
+
     // Platform metadata
     let plat = PlatformMeta {
         os: std::env::consts::OS,
@@ -269,6 +297,13 @@ fn build_support_bundle(manager: &DaemonManager) -> Result<SupportBundle, String
         note: None,
     });
 
+    manifest.push(ManifestEntry {
+        section: "signal_status".to_string(),
+        present: true,
+        count: None,
+        note: Some(format!("signal server: {signal_status}")),
+    });
+
     // Write to disk
     let bundle_dir = platform::support_bundle_dir();
     std::fs::create_dir_all(&bundle_dir).map_err(|e| format!("create bundle dir: {e}"))?;
@@ -282,6 +317,7 @@ fn build_support_bundle(manager: &DaemonManager) -> Result<SupportBundle, String
         output_path: output_path.to_string_lossy().to_string(),
         app_version,
         daemon_version,
+        signal_status,
         platform: plat,
         ipc_config,
         watchdog,
@@ -358,6 +394,15 @@ mod tests {
     }
 
     #[test]
+    fn signal_status_response_serializes() {
+        let resp = SignalStatusResponse {
+            status: SignalStatus::Active,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"active\""));
+    }
+
+    #[test]
     fn support_bundle_builds_successfully() {
         let mgr = DaemonManager::new();
         let result = build_support_bundle(&mgr);
@@ -374,6 +419,7 @@ mod tests {
         assert!(section_names.contains(&"platform_metadata"));
         assert!(section_names.contains(&"spawn_counters"));
         assert!(section_names.contains(&"ipc_config"));
+        assert!(section_names.contains(&"signal_status"));
 
         // Verify file was written
         assert!(!bundle.output_path.is_empty());
