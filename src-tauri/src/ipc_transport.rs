@@ -25,12 +25,18 @@ impl IpcStream {
         let path_str = path.to_string_lossy();
 
         #[cfg(windows)]
-        if crate::platform::is_windows_pipe_path(&path_str) {
-            let file = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(path)?;
-            return Ok(Self::Pipe(file));
+        {
+            if crate::platform::is_windows_pipe_path(&path_str) {
+                let file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(path)?;
+                return Ok(Self::Pipe(file));
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                format!("non-pipe IPC path on Windows: {path_str}"),
+            ));
         }
 
         #[cfg(unix)]
@@ -67,7 +73,7 @@ impl IpcStream {
             #[cfg(windows)]
             Self::Pipe(_) => {
                 // Named pipe client read timeout not directly configurable via File.
-                // Compile-validated; Windows runtime uses blocking reads.
+                let _ = timeout;
                 Ok(())
             }
         }
@@ -79,7 +85,10 @@ impl IpcStream {
             #[cfg(unix)]
             Self::Unix(s) => s.set_write_timeout(timeout),
             #[cfg(windows)]
-            Self::Pipe(_) => Ok(()),
+            Self::Pipe(_) => {
+                let _ = timeout;
+                Ok(())
+            }
         }
     }
 
