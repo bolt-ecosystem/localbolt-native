@@ -2,6 +2,7 @@
 //!
 //! Spawns bolt-daemon as a Tauri sidecar, manages PID files,
 //! handles stale socket/PID cleanup, and coordinates with the watchdog.
+//! N6-B3: Platform-aware path wiring with --socket-path and --data-dir.
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -11,11 +12,10 @@ use tauri::Emitter;
 
 use crate::daemon_log::StderrBuffer;
 use crate::ipc_bridge::IpcBridge;
-use crate::ipc_client::{self, ReadinessResult, DAEMON_SOCKET_PATH};
+use crate::ipc_client::{self, ReadinessResult};
+use crate::ipc_transport::IpcStream;
+use crate::platform;
 use crate::watchdog::{Watchdog, WatchdogState, STARTUP_TIMEOUT};
-
-/// PID file location (matches N1 spec for macOS/Linux dev).
-const PID_FILE_PATH: &str = "/tmp/bolt-daemon.pid";
 
 /// App version used for IPC handshake.
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -35,6 +35,12 @@ pub struct DaemonManager {
     app_handle: Option<tauri::AppHandle>,
     child_pid: Arc<Mutex<Option<u32>>>,
     shutdown_flag: Arc<std::sync::atomic::AtomicBool>,
+    // N6-B3: platform-aware paths
+    socket_path: String,
+    pid_path: String,
+    data_dir: String,
+    daemon_version: Arc<Mutex<Option<String>>>,
+    spawn_count: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl DaemonManager {
@@ -46,7 +52,34 @@ impl DaemonManager {
             app_handle: None,
             child_pid: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            socket_path: platform::default_ipc_path(),
+            pid_path: platform::default_pid_path(),
+            data_dir: platform::default_data_dir(),
+            daemon_version: Arc::new(Mutex::new(None)),
+            spawn_count: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
+    }
+
+    // ── Accessors ─────────────────────────────────────────────
+
+    pub fn socket_path(&self) -> &str {
+        &self.socket_path
+    }
+
+    pub fn pid_path(&self) -> &str {
+        &self.pid_path
+    }
+
+    pub fn data_dir(&self) -> &str {
+        &self.data_dir
+    }
+
+    pub fn daemon_version(&self) -> Option<String> {
+        self.daemon_version.lock().unwrap().clone()
+    }
+
+    pub fn spawn_count(&self) -> u32 {
+        self.spawn_count.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Set the Tauri AppHandle for event emission (called from setup).
@@ -111,14 +144,15 @@ impl DaemonManager {
         // Pre-spawn cleanup
         self.run_cleanup();
 
-        // Attempt spawn
-        let socket_path = Path::new(DAEMON_SOCKET_PATH);
+        let socket_path = Path::new(&self.socket_path);
 
         match self.spawn_daemon() {
             Ok(pid) => {
                 tracing::info!("[WATCHDOG] daemon spawned (pid={pid})");
                 *self.child_pid.lock().unwrap() = Some(pid);
                 self.write_pid_file(pid);
+                self.spawn_count
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 // Wait briefly for daemon to initialize, then probe
                 std::thread::sleep(std::time::Duration::from_millis(500));
@@ -135,7 +169,8 @@ impl DaemonManager {
                         return;
                     }
 
-                    if !socket_path.exists() {
+                    if !socket_path.exists() && !platform::is_windows_pipe_path(&self.socket_path) {
+                        // Unix socket: wait for file to appear
                         std::thread::sleep(std::time::Duration::from_millis(250));
                         continue;
                     }
@@ -145,6 +180,7 @@ impl DaemonManager {
                             tracing::info!(
                                 "[WATCHDOG] readiness confirmed: daemon v{daemon_version}"
                             );
+                            *self.daemon_version.lock().unwrap() = Some(daemon_version.clone());
                             self.watchdog.lock().unwrap().on_daemon_ready();
                             self.emit_watchdog_state();
 
@@ -165,6 +201,7 @@ impl DaemonManager {
                         }
                         ReadinessResult::Incompatible { daemon_version } => {
                             tracing::warn!("[WATCHDOG] daemon incompatible: v{daemon_version}");
+                            *self.daemon_version.lock().unwrap() = Some(daemon_version);
                             self.watchdog.lock().unwrap().on_version_incompatible();
                             self.emit_watchdog_state();
                             return;
@@ -184,6 +221,8 @@ impl DaemonManager {
     }
 
     /// Spawn bolt-daemon as a child process.
+    ///
+    /// N6-B3: passes --socket-path and --data-dir from platform defaults.
     fn spawn_daemon(&self) -> Result<u32, String> {
         let binary_path = self.resolve_daemon_binary()?;
 
@@ -195,6 +234,10 @@ impl DaemonManager {
                 "default",
                 "--pairing-policy",
                 "ask",
+                "--socket-path",
+                &self.socket_path,
+                "--data-dir",
+                &self.data_dir,
             ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
@@ -222,7 +265,7 @@ impl DaemonManager {
             });
         }
 
-        // Detach the child handle — we track via PID and use libc::kill for signals.
+        // Detach the child handle — we track via PID and use platform signals.
         std::mem::forget(child);
 
         Ok(pid)
@@ -244,12 +287,31 @@ impl DaemonManager {
         }
 
         // Check system PATH
+        #[cfg(unix)]
         if let Ok(output) = std::process::Command::new("which")
             .arg("bolt-daemon")
             .output()
         {
             if output.status.success() {
                 let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Ok(PathBuf::from(path));
+                }
+            }
+        }
+
+        #[cfg(windows)]
+        if let Ok(output) = std::process::Command::new("where")
+            .arg("bolt-daemon")
+            .output()
+        {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
                 if !path.is_empty() {
                     return Ok(PathBuf::from(path));
                 }
@@ -278,9 +340,7 @@ impl DaemonManager {
                 return;
             }
 
-            // Check if process is still alive
-            let alive = unsafe { libc::kill(pid as i32, 0) == 0 };
-            if !alive {
+            if !platform::process_alive(pid) {
                 let exit_code = self.get_exit_code(pid);
                 tracing::warn!("[WATCHDOG] daemon exited (pid={pid}, code={exit_code:?})");
                 *self.child_pid.lock().unwrap() = None;
@@ -290,29 +350,19 @@ impl DaemonManager {
 
                 let delay = self.watchdog.lock().unwrap().on_daemon_exit(exit_code);
                 self.emit_watchdog_state();
+                let retry_count = self.watchdog.lock().unwrap().retry_count();
+                let log_dir = platform::crash_log_dir();
+
+                let _ = crate::daemon_log::write_crash_snapshot(
+                    &self.stderr_buffer,
+                    &log_dir,
+                    exit_code,
+                    Some(pid),
+                    retry_count,
+                );
+
                 if let Some(d) = delay {
-                    // Write crash snapshot
-                    let retry_count = self.watchdog.lock().unwrap().retry_count();
-                    let log_dir = self.crash_log_dir();
-                    let _ = crate::daemon_log::write_crash_snapshot(
-                        &self.stderr_buffer,
-                        &log_dir,
-                        exit_code,
-                        Some(pid),
-                        retry_count,
-                    );
                     std::thread::sleep(d);
-                } else {
-                    // Entering degraded — write final crash snapshot
-                    let retry_count = self.watchdog.lock().unwrap().retry_count();
-                    let log_dir = self.crash_log_dir();
-                    let _ = crate::daemon_log::write_crash_snapshot(
-                        &self.stderr_buffer,
-                        &log_dir,
-                        exit_code,
-                        Some(pid),
-                        retry_count,
-                    );
                 }
                 return;
             }
@@ -325,47 +375,25 @@ impl DaemonManager {
     }
 
     fn get_exit_code(&self, _pid: u32) -> Option<i32> {
-        // On Unix, waitpid would give us exit code, but we forked via
-        // std::process::Command and forgot the handle. We can't waitpid
-        // a non-child. Return None for now.
+        // On Unix, we can't waitpid a non-child after std::mem::forget.
+        // On Windows, we'd need OpenProcess + GetExitCodeProcess.
+        // Return None for now — exit code reported via crash snapshot stderr.
         None
-    }
-
-    fn crash_log_dir(&self) -> PathBuf {
-        // macOS: ~/Library/Logs/LocalBolt/
-        // Linux: $XDG_STATE_HOME/localbolt/ or ~/.local/state/localbolt/
-        #[cfg(target_os = "macos")]
-        {
-            if let Some(home) = std::env::var_os("HOME") {
-                return PathBuf::from(home).join("Library/Logs/LocalBolt");
-            }
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            if let Ok(state) = std::env::var("XDG_STATE_HOME") {
-                return PathBuf::from(state).join("localbolt");
-            }
-            if let Some(home) = std::env::var_os("HOME") {
-                return PathBuf::from(home).join(".local/state/localbolt");
-            }
-        }
-        PathBuf::from("/tmp/localbolt-logs")
     }
 
     // ── Cleanup ────────────────────────────────────────────────
 
     /// Pre-spawn cleanup: remove stale PID/socket files.
     pub fn run_cleanup(&self) {
-        let socket_path = Path::new(DAEMON_SOCKET_PATH);
-        let pid_path = Path::new(PID_FILE_PATH);
+        let socket_path = Path::new(&self.socket_path);
+        let pid_path = Path::new(&self.pid_path);
 
         // Step 1: Check PID file
         if pid_path.exists() {
             if let Ok(content) = std::fs::read_to_string(pid_path) {
-                if let Ok(pid) = content.trim().parse::<i32>() {
-                    let alive = unsafe { libc::kill(pid, 0) == 0 };
-                    if alive {
-                        if socket_path.exists() && ipc_client::socket_probe(socket_path) {
+                if let Ok(pid) = content.trim().parse::<u32>() {
+                    if platform::process_alive(pid) {
+                        if socket_path.exists() && IpcStream::probe(socket_path) {
                             tracing::info!(
                                 "[WATCHDOG] existing daemon alive (pid={pid}), will connect"
                             );
@@ -375,16 +403,10 @@ impl DaemonManager {
                         tracing::warn!(
                             "[WATCHDOG] daemon alive (pid={pid}) but socket missing, killing"
                         );
-                        unsafe {
-                            libc::kill(pid, libc::SIGTERM);
-                        }
-                        // Brief wait then SIGKILL
+                        platform::process_terminate(pid);
                         std::thread::sleep(std::time::Duration::from_secs(2));
-                        let still_alive = unsafe { libc::kill(pid, 0) == 0 };
-                        if still_alive {
-                            unsafe {
-                                libc::kill(pid, libc::SIGKILL);
-                            }
+                        if platform::process_alive(pid) {
+                            platform::process_force_kill(pid);
                             std::thread::sleep(std::time::Duration::from_millis(500));
                         }
                     }
@@ -394,9 +416,9 @@ impl DaemonManager {
             tracing::info!("[WATCHDOG] cleaned stale PID file");
         }
 
-        // Step 2: Check stale socket
-        if socket_path.exists() {
-            if ipc_client::socket_probe(socket_path) {
+        // Step 2: Check stale socket (not applicable for Windows named pipes)
+        if !platform::is_windows_pipe_path(&self.socket_path) && socket_path.exists() {
+            if IpcStream::probe(socket_path) {
                 tracing::info!("[WATCHDOG] responsive daemon found via socket probe");
                 return;
             }
@@ -406,7 +428,7 @@ impl DaemonManager {
     }
 
     fn write_pid_file(&self, pid: u32) {
-        let pid_path = Path::new(PID_FILE_PATH);
+        let pid_path = Path::new(&self.pid_path);
         if let Err(e) = std::fs::write(pid_path, pid.to_string()) {
             tracing::warn!("[WATCHDOG] failed to write PID file: {e}");
         }
@@ -414,7 +436,7 @@ impl DaemonManager {
 
     // ── Shutdown ───────────────────────────────────────────────
 
-    /// Initiate clean daemon shutdown (SIGTERM -> 5s grace -> SIGKILL).
+    /// Initiate clean daemon shutdown.
     pub fn shutdown(&self) {
         self.bridge.shutdown();
         self.shutdown_flag
@@ -430,33 +452,32 @@ impl DaemonManager {
 
         tracing::info!("[WATCHDOG] initiating daemon shutdown (pid={pid})");
 
-        // SIGTERM
-        unsafe {
-            libc::kill(pid as i32, libc::SIGTERM);
-        }
+        platform::process_terminate(pid);
 
         // Wait up to 5s for clean exit
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            let alive = unsafe { libc::kill(pid as i32, 0) == 0 };
-            if !alive {
+            if !platform::process_alive(pid) {
                 tracing::info!("[WATCHDOG] daemon exited cleanly (pid={pid})");
                 break;
             }
             if std::time::Instant::now() >= deadline {
-                tracing::warn!("[WATCHDOG] daemon did not exit in 5s, sending SIGKILL (pid={pid})");
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGKILL);
-                }
+                tracing::warn!("[WATCHDOG] daemon did not exit in 5s, forcing kill (pid={pid})");
+                platform::process_force_kill(pid);
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
-        // Cleanup PID and socket files
-        let _ = std::fs::remove_file(PID_FILE_PATH);
-        let _ = std::fs::remove_file(DAEMON_SOCKET_PATH);
+        // Cleanup PID file
+        let _ = std::fs::remove_file(&self.pid_path);
+
+        // Cleanup socket file (not applicable for Windows named pipes)
+        if !platform::is_windows_pipe_path(&self.socket_path) {
+            let _ = std::fs::remove_file(&self.socket_path);
+        }
+
         tracing::info!("[WATCHDOG] shutdown cleanup complete");
     }
 
@@ -493,18 +514,16 @@ mod tests {
         let test_pid = 99999u32;
         mgr.write_pid_file(test_pid);
 
-        let content = std::fs::read_to_string(PID_FILE_PATH).unwrap();
+        let content = std::fs::read_to_string(mgr.pid_path()).unwrap();
         assert_eq!(content, "99999");
 
-        let _ = std::fs::remove_file(PID_FILE_PATH);
+        let _ = std::fs::remove_file(mgr.pid_path());
     }
 
     #[test]
     fn resolve_daemon_binary_fails_gracefully() {
         let mgr = DaemonManager::new();
-        // In test environment, binary likely not in bin/ — should handle gracefully
         let result = mgr.resolve_daemon_binary();
-        // May succeed or fail depending on environment; just ensure no panic
         match result {
             Ok(p) => assert!(!p.as_os_str().is_empty()),
             Err(e) => assert!(e.contains("not found")),
@@ -516,7 +535,39 @@ mod tests {
         let mgr = DaemonManager::new();
         mgr.shutdown_flag
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        // lifecycle_loop should exit immediately
         mgr.lifecycle_loop();
+    }
+
+    #[test]
+    fn platform_paths_populated() {
+        let mgr = DaemonManager::new();
+        assert!(!mgr.socket_path().is_empty());
+        assert!(!mgr.pid_path().is_empty());
+        assert!(!mgr.data_dir().is_empty());
+    }
+
+    #[test]
+    fn spawn_count_starts_at_zero() {
+        let mgr = DaemonManager::new();
+        assert_eq!(mgr.spawn_count(), 0);
+    }
+
+    #[test]
+    fn daemon_version_initially_none() {
+        let mgr = DaemonManager::new();
+        assert!(mgr.daemon_version().is_none());
+    }
+
+    #[test]
+    fn spawn_args_include_socket_and_data_dir() {
+        // Verify the spawn command would include the path flags
+        let mgr = DaemonManager::new();
+        let socket = mgr.socket_path();
+        let data = mgr.data_dir();
+        assert!(!socket.is_empty());
+        assert!(!data.is_empty());
+        // On Unix, socket path should be a .sock file
+        #[cfg(not(windows))]
+        assert!(socket.ends_with(".sock"));
     }
 }

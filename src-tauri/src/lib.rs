@@ -3,7 +3,9 @@ mod daemon;
 mod daemon_log;
 mod ipc_bridge;
 mod ipc_client;
+mod ipc_transport;
 mod ipc_types;
+mod platform;
 mod watchdog;
 
 use bolt_rendezvous::SignalingServer;

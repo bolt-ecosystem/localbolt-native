@@ -6,7 +6,6 @@
 //! to the Tauri frontend and relays user decisions back to the daemon.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,6 +13,7 @@ use std::time::Duration;
 
 use tauri::Emitter;
 
+use crate::ipc_transport::IpcStream;
 use crate::ipc_types::{
     DaemonStatusPayload, IpcKind, IpcMessage, PairingRequestPayload,
     TransferIncomingRequestPayload, VersionHandshakePayload, VersionStatusPayload,
@@ -27,7 +27,7 @@ const EVENT_LOOP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Persistent IPC bridge between app and daemon.
 pub struct IpcBridge {
-    writer: Arc<Mutex<Option<UnixStream>>>,
+    writer: Arc<Mutex<Option<IpcStream>>>,
     shutdown: Arc<AtomicBool>,
 }
 
@@ -49,8 +49,7 @@ impl IpcBridge {
         app_version: &str,
         app_handle: tauri::AppHandle,
     ) -> Result<(), String> {
-        let stream =
-            UnixStream::connect(socket_path).map_err(|e| format!("bridge connect: {e}"))?;
+        let stream = IpcStream::connect(socket_path).map_err(|e| format!("bridge connect: {e}"))?;
         stream
             .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
             .map_err(|e| format!("set_read_timeout: {e}"))?;
@@ -64,7 +63,7 @@ impl IpcBridge {
         let mut writer = stream
             .try_clone()
             .map_err(|e| format!("clone for handshake: {e}"))?;
-        let mut reader = BufReader::new(stream);
+        let reader = BufReader::new(stream);
 
         // Step 1: Send version.handshake
         let handshake = IpcMessage::new_decision(
@@ -85,6 +84,7 @@ impl IpcBridge {
             .map_err(|e| format!("flush handshake: {e}"))?;
 
         // Step 2: Read version.status
+        let mut reader = reader;
         let mut buf = String::new();
         reader
             .read_line(&mut buf)
@@ -125,8 +125,6 @@ impl IpcBridge {
         }
 
         // Switch to event-loop timeout (longer, allows shutdown checks)
-        // Since write_stream shares the underlying socket, setting timeout
-        // on it affects reads on the original stream wrapped by BufReader.
         let _ = write_stream.set_read_timeout(Some(EVENT_LOOP_TIMEOUT));
 
         // Store writer for decision relay
@@ -143,7 +141,7 @@ impl IpcBridge {
     }
 
     fn event_loop(
-        mut reader: BufReader<UnixStream>,
+        mut reader: BufReader<IpcStream>,
         app_handle: &tauri::AppHandle,
         shutdown: &AtomicBool,
     ) {
@@ -285,12 +283,7 @@ mod tests {
 
     #[test]
     fn dispatch_ignores_non_event_kind() {
-        // dispatch_event should silently skip decision-kind messages.
-        // We can't easily test emit without a real AppHandle, but we
-        // verify the function doesn't panic on non-event input.
         let line = r#"{"id":"app-0","kind":"decision","type":"test","ts_ms":0,"payload":{}}"#;
-        // This just tests the parse + kind check path — no AppHandle needed
-        // for the skip branch. We verify via the IpcMessage parse.
         let msg: IpcMessage = serde_json::from_str(line).unwrap();
         assert_eq!(msg.kind, crate::ipc_types::IpcKind::Decision);
     }

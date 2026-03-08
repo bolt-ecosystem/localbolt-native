@@ -1,20 +1,17 @@
 //! Minimal IPC client for daemon readiness probing.
 //!
-//! Connects to the daemon's Unix socket, performs version handshake,
-//! and reads the daemon.status event. Full message routing (pairing,
-//! transfer decisions) is deferred to N6-A2.
+//! Connects to the daemon's IPC endpoint, performs version handshake,
+//! and reads the daemon.status event. Uses cross-platform IpcStream
+//! for Unix socket (macOS/Linux) and named pipe (Windows) support.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
+use crate::ipc_transport::IpcStream;
 use crate::ipc_types::{
     DaemonStatusPayload, IpcKind, IpcMessage, VersionHandshakePayload, VersionStatusPayload,
 };
-
-/// Default socket path (matches daemon's DEFAULT_SOCKET_PATH).
-pub const DAEMON_SOCKET_PATH: &str = "/tmp/bolt-daemon.sock";
 
 /// Timeout for the full readiness handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -36,13 +33,13 @@ pub enum ReadinessResult {
 
 /// Probe daemon readiness via IPC.
 ///
-/// 1. Connect to Unix socket
+/// 1. Connect to IPC endpoint (Unix socket or Windows named pipe)
 /// 2. Send version.handshake
 /// 3. Read version.status
 /// 4. Read daemon.status
 pub fn probe_readiness(socket_path: &Path, app_version: &str) -> ReadinessResult {
-    // Connect
-    let stream = match UnixStream::connect(socket_path) {
+    // Connect via platform-aware transport
+    let stream = match IpcStream::connect(socket_path) {
         Ok(s) => s,
         Err(e) => {
             return ReadinessResult::Failed(format!("socket connect failed: {e}"));
@@ -56,8 +53,17 @@ pub fn probe_readiness(socket_path: &Path, app_version: &str) -> ReadinessResult
         return ReadinessResult::Failed(format!("set_write_timeout: {e}"));
     }
 
-    let mut writer = stream.try_clone().unwrap();
-    let mut reader = BufReader::new(stream);
+    let mut writer = match stream.try_clone() {
+        Ok(w) => w,
+        Err(e) => return ReadinessResult::Failed(format!("clone stream: {e}")),
+    };
+    let reader_stream = match stream.try_clone() {
+        Ok(r) => r,
+        Err(e) => return ReadinessResult::Failed(format!("clone reader: {e}")),
+    };
+    // Drop original to avoid holding extra handles
+    drop(stream);
+    let mut reader = BufReader::new(reader_stream);
 
     // Step 1: Send version.handshake
     let handshake = IpcMessage::new_decision(
@@ -144,25 +150,24 @@ pub fn probe_readiness(socket_path: &Path, app_version: &str) -> ReadinessResult
     }
 }
 
-/// Check if a socket path has a responsive daemon.
-///
-/// Non-blocking probe: connect + immediate disconnect. Used for stale socket detection.
-pub fn socket_probe(socket_path: &Path) -> bool {
-    match UnixStream::connect(socket_path) {
-        Ok(stream) => {
-            let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
-            drop(stream);
-            true
-        }
-        Err(_) => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::net::UnixListener;
 
+    #[test]
+    fn probe_fails_on_nonexistent_socket() {
+        let path = Path::new("/tmp/bolt-nonexistent-test.sock");
+        let result = probe_readiness(path, "1.0.0");
+        matches!(result, ReadinessResult::Failed(_));
+    }
+
+    #[test]
+    fn ipc_probe_returns_false_for_nonexistent() {
+        let path = Path::new("/tmp/bolt-nonexistent-probe-test.sock");
+        assert!(!IpcStream::probe(path));
+    }
+
+    #[cfg(unix)]
     fn temp_socket_path() -> std::path::PathBuf {
         let id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -171,30 +176,22 @@ mod tests {
         std::path::PathBuf::from(format!("/tmp/bolt-test-ipc-{id}.sock"))
     }
 
+    #[cfg(unix)]
     #[test]
-    fn probe_fails_on_nonexistent_socket() {
-        let path = std::path::Path::new("/tmp/bolt-nonexistent-test.sock");
-        let result = probe_readiness(path, "1.0.0");
-        matches!(result, ReadinessResult::Failed(_));
-    }
-
-    #[test]
-    fn socket_probe_returns_false_for_nonexistent() {
-        let path = std::path::Path::new("/tmp/bolt-nonexistent-probe-test.sock");
-        assert!(!socket_probe(path));
-    }
-
-    #[test]
-    fn socket_probe_returns_true_for_listening() {
+    fn ipc_probe_returns_true_for_listening() {
+        use std::os::unix::net::UnixListener;
         let path = temp_socket_path();
         let _ = std::fs::remove_file(&path);
         let _listener = UnixListener::bind(&path).unwrap();
-        assert!(socket_probe(&path));
+        assert!(IpcStream::probe(&path));
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn probe_readiness_with_compatible_mock() {
+        use std::io::Write;
+        use std::os::unix::net::UnixListener;
         let path = temp_socket_path();
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).unwrap();
@@ -262,8 +259,11 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn probe_readiness_with_incompatible_mock() {
+        use std::io::Write;
+        use std::os::unix::net::UnixListener;
         let path = temp_socket_path();
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).unwrap();
