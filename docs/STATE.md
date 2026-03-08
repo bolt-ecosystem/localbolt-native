@@ -6,10 +6,10 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.13-n6b3-ga-wiring
-- **Commit:** 88954c8
+- **Tag:** localbolt-app-v1.2.14-n8-signal-observability
+- **Commit:** a7e4f8b
 - **Date:** 2026-03-07
-- **Tests:** 52 web (4 files) + 66 Rust (9 modules) = 118 total
+- **Tests:** 64 web (5 files) + 82 Rust (10 modules) = 146 total
 
 ## Dependencies (web/package.json)
 
@@ -55,6 +55,6 @@
 - **Branch:** main
 - **Status:** Active
 - **Build:** Passing (vite)
-- **Tests:** 118 pass (52 web + 66 Rust)
-- **src-tauri:** N6-B3 GA wiring + support bundle + cross-platform IPC transport
-- **web:** daemon service, readiness gating, degraded/incompatible UX
+- **Tests:** 146 pass (64 web + 82 Rust)
+- **src-tauri:** N8 signal observability + N6-B3 GA wiring + support bundle + cross-platform IPC transport
+- **web:** unified health indicator, signal status subscription, daemon service, readiness gating

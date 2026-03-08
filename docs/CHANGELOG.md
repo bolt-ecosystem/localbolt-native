@@ -4,6 +4,41 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.14-n8-signal-observability — 2026-03-07
+
+**Commit:** a7e4f8b
+
+N8 signal health observability — post-closure follow-on from N-STREAM-1/A0.
+
+- Signal health monitor (signal_monitor.rs): app-side TCP probe to
+  127.0.0.1:3001 with 4-state machine (unknown/active/degraded/offline),
+  5s interval, 3-failure offline threshold, shutdown-aware suppression
+- Unified health indicator: aggregates daemon watchdog + signal status
+  into combined display (HEALTHY/SIG DEGRADED/SIG OFFLINE/STARTING)
+- Individual daemon + signal status dots preserved alongside unified
+- get_signal_status Tauri command for point-in-time probe
+- signal://status event subscription in frontend daemon service
+- Support bundle includes signal_status section
+- No transfer gating changes (observability only, per PM approval)
+- AC-SE-06 realized: signal health measured by app (runtime owner)
+- AC-SE-07 realized: unified indicator reflects daemon + signal state
+- Option A topology preserved: app remains signal server owner
+- 82 Rust tests (66 existing + 16 new), clippy clean, fmt clean
+- 64 web tests (52 existing + 12 new), all pass
+- signal/ subtree: zero diff (guardrail verified)
+
+**Files changed:**
+- src-tauri/src/signal_monitor.rs (new — 343 lines, 15 tests)
+- src-tauri/src/commands.rs (get_signal_status, bundle signal_status)
+- src-tauri/src/daemon.rs (shutdown_flag accessor)
+- src-tauri/src/lib.rs (module + monitor + command registration)
+- web/src/services/daemon.ts (SignalStatus type, event subscription)
+- web/src/services/__tests__/daemon.test.ts (4 new signal tests)
+- web/src/sections/header.ts (unified + individual indicators)
+- web/src/sections/__tests__/header.test.ts (new — 8 unified tests)
+
+---
+
 ## localbolt-app-v1.2.13-n6b3-ga-wiring — 2026-03-07
 
 **Commit:** 88954c8
