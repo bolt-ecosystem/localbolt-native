@@ -33,10 +33,10 @@ impl IpcStream {
                     .open(path)?;
                 return Ok(Self::Pipe(file));
             }
-            return Err(io::Error::new(
+            Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 format!("non-pipe IPC path on Windows: {path_str}"),
-            ));
+            ))
         }
 
         #[cfg(unix)]
