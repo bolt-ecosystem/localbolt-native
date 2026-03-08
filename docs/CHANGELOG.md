@@ -4,6 +4,45 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.13-n6b3-ga-wiring — 2026-03-07
+
+**Commit:** 88954c8
+
+N-STREAM-1 / N6-B3: GA wiring, support bundle completion, cross-platform IPC.
+
+- Platform-aware IPC paths: --socket-path and --data-dir passed to daemon
+  at spawn (platform.rs centralized defaults for macOS/Linux/Windows)
+- Cross-platform IPC transport abstraction (ipc_transport.rs): IpcStream
+  enum supports Unix domain sockets and Windows named pipes. All IPC
+  client/bridge code migrated from direct UnixStream usage
+- Full support bundle export (commands.rs): 8 manifest sections — daemon
+  stderr, crash snapshots, watchdog state, app/daemon versions, platform
+  metadata, spawn counters, IPC config. Missing artifacts explicitly marked
+- Daemon process management abstracted: platform::process_alive/terminate/
+  force_kill helpers (Unix via libc, Windows compile-validated stubs)
+- DaemonManager tracks daemon_version and spawn_count for diagnostics
+- Windows named pipe path detection and platform-aware binary resolution
+  (which → where on Windows)
+- Signal server coexistence verified: TCP:3001 vs Unix socket, no conflict
+- B-DEP-N1-1 consumed: daemon receives --socket-path and --data-dir
+- B-DEP-N2-3 integrated: transport layer supports \\.\pipe\ format
+- 66 Rust tests (18 new across platform, ipc_transport, commands, daemon)
+- 52 web tests unchanged, all pass
+- Quality gates: cargo clippy 0 warnings, cargo fmt clean
+
+No subtree modifications. No daemon protocol changes.
+
+**Files changed:**
+- src-tauri/src/platform.rs (new, 202 lines)
+- src-tauri/src/ipc_transport.rs (new, 191 lines)
+- src-tauri/src/commands.rs (support bundle implementation)
+- src-tauri/src/daemon.rs (path wiring, process helpers)
+- src-tauri/src/ipc_bridge.rs (IpcStream transport)
+- src-tauri/src/ipc_client.rs (IpcStream transport)
+- src-tauri/src/lib.rs (module declarations)
+
+---
+
 ## localbolt-app-v1.2.12-n6a2-ipc-ui-gating — 2026-03-07
 
 **Commit:** 8f4aea9

@@ -6,10 +6,10 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.12-n6a2-ipc-ui-gating
-- **Commit:** 8f4aea9
+- **Tag:** localbolt-app-v1.2.13-n6b3-ga-wiring
+- **Commit:** 88954c8
 - **Date:** 2026-03-07
-- **Tests:** 52 web (4 files) + 48 Rust (7 modules) = 100 total
+- **Tests:** 52 web (4 files) + 66 Rust (9 modules) = 118 total
 
 ## Dependencies (web/package.json)
 
@@ -55,6 +55,6 @@
 - **Branch:** main
 - **Status:** Active
 - **Build:** Passing (vite)
-- **Tests:** 100 pass (52 web + 48 Rust)
-- **src-tauri:** N6-A2 IPC bridge + event forwarding + decision relay
+- **Tests:** 118 pass (52 web + 66 Rust)
+- **src-tauri:** N6-B3 GA wiring + support bundle + cross-platform IPC transport
 - **web:** daemon service, readiness gating, degraded/incompatible UX
