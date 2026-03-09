@@ -1,6 +1,6 @@
 # LocalBolt App
 
-Native desktop app for [LocalBolt](https://localbolt.site). Encrypted peer-to-peer file transfer with an embedded signaling server.
+Native desktop app for [LocalBolt](https://localbolt.app). Encrypted peer-to-peer file transfer with an embedded signaling server.
 
 Built with [Tauri v2](https://tauri.app). No browser needed. Open the app and start transferring.
 
@@ -83,7 +83,7 @@ This is an **open-source** project. Free to use, build, and modify.
 
 ## Related
 
-- **[localbolt.site](https://localbolt.site)** — use it in the browser, no install
+- **[localbolt.app](https://localbolt.app)** — use it in the browser, no install
 - **[LocalBolt (self-hosted)](https://github.com/the9ines/localbolt)** — download and run on your own network
 
 ## License
