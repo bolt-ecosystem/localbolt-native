@@ -14,7 +14,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
     "@the9ines/bolt-core": "0.5.1",
-    "@the9ines/bolt-transport-web": "0.6.5",
+    "@the9ines/bolt-transport-web": "0.6.6",
     "@the9ines/localbolt-core": "0.1.2",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1"
