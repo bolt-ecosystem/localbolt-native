@@ -6,9 +6,9 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.22-domain-rename
-- **Commit:** beb8891
-- **Date:** 2026-03-08
+- **Tag:** localbolt-app-v1.2.23-recon-xfer1-phase-b
+- **Commit:** 84a4749
+- **Date:** 2026-03-09
 - **Tests:** 64 web (5 files) + 82 Rust (10 modules) = 146 total
 
 ## Dependencies (web/package.json)

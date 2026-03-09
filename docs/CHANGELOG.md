@@ -4,6 +4,45 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.23-recon-xfer1-phase-b — 2026-03-09
+
+**Commit:** 84a4749
+
+RECON-XFER-1 Phase B verification — no code changes required.
+
+Consumer audit confirmed localbolt-app is already protected against the reconnect-resend
+bug (RECON-XFER-1) via both web-layer and Tauri/Rust-layer defenses.
+
+**Evidence (no-change proof):**
+
+Web layer:
+- Same `@the9ines/localbolt-core` generation guards as localbolt (shared SDK)
+- Phase guards (`beginRequest`, `receiveRequest`, `markConnected`) enforce state preconditions
+- 21 security-session-integrity tests + 10 TOFU integration tests covering stale callback rejection
+
+Tauri/Rust layer:
+- IPC bridge: Writer guarded by Mutex; old reader thread guaranteed dead before new one spawns
+- `send_decision()` fails safely if bridge disconnected — no stale message delivery
+- Watchdog 5-state machine (Starting→Ready→Restarting→Degraded→Incompatible); no stale state survives daemon restart
+- Multi-layer transfer gate: daemon readiness + verification state + connection state — all three required
+- No Tauri command caches service/session refs across reconnect
+
+Build/test results:
+- Web build: Vite production build green (WASM bundle present)
+- Web tests: 5 files, 64 tests — all pass
+- Rust tests: 82 tests — all pass (146 total)
+- Type check: not separately configured (Vite handles)
+
+**AC evidence:**
+- AC-RX-07 (remaining consumers): localbolt-app verified — no patch needed
+- AC-RX-08 (WASM/fallback): WASM policy adapter is orthogonal to reconnect path (transfer scheduling only, not session lifecycle). Build output includes WASM bundle. Forced-fallback uses same session lifecycle. Manual runtime confirmation deferred (not automatable without live peers).
+
+**Files changed:**
+- docs/CHANGELOG.md
+- docs/STATE.md
+
+---
+
 ## localbolt-app-v1.2.22-domain-rename — 2026-03-08
 
 **Commit:** beb8891
