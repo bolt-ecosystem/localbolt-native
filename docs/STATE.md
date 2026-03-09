@@ -6,9 +6,9 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.14-n8-signal-observability
-- **Commit:** a7e4f8b
-- **Date:** 2026-03-07
+- **Tag:** localbolt-app-v1.2.21-csp-wasm
+- **Commit:** 83a8350
+- **Date:** 2026-03-08
 - **Tests:** 64 web (5 files) + 82 Rust (10 modules) = 146 total
 
 ## Dependencies (web/package.json)

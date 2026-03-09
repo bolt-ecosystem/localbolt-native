@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.21-csp-wasm — 2026-03-08
+
+**Commit:** 83a8350
+
+Allow WASM compilation in CSP for policy adapter.
+
+**Files changed:**
+- web/index.html
+
+---
+
 ## localbolt-app-v1.2.14-n8-signal-observability — 2026-03-07
 
 **Commit:** a7e4f8b
