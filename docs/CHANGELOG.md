@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.22-domain-rename — 2026-03-08
+
+**Commit:** beb8891
+
+Rename localbolt.site references to localbolt.app.
+
+**Files changed:**
+- README.md
+
+---
+
 ## localbolt-app-v1.2.21-csp-wasm — 2026-03-08
 
 **Commit:** 83a8350

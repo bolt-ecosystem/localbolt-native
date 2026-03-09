@@ -6,8 +6,8 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.21-csp-wasm
-- **Commit:** 83a8350
+- **Tag:** localbolt-app-v1.2.22-domain-rename
+- **Commit:** beb8891
 - **Date:** 2026-03-08
 - **Tests:** 64 web (5 files) + 82 Rust (10 modules) = 146 total
 
