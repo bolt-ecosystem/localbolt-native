@@ -11,6 +11,15 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      // PolicyAdapter.js dynamically imports a WASM module that may not exist at
+      // build time. The import is wrapped in try/catch with a TS fallback, so
+      // marking it external is safe — the dynamic import will fail at runtime and
+      // the catch block activates the TsFallbackPolicyAdapter.
+      external: [/bolt_transfer_policy_wasm/],
+    },
+  },
   test: {
     include: ["src/**/*.test.ts"],
     server: {
