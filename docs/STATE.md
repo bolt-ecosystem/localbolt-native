@@ -7,7 +7,7 @@
 ## Latest Release
 
 - **Tag:** localbolt-app-v1.2.24-consumer-btr1-p3
-- **Commit:** (pending)
+- **Commit:** ff33747
 - **Date:** 2026-03-12
 - **Tests:** 74 web (6 files) + 82 Rust (10 modules) = 156 total
 

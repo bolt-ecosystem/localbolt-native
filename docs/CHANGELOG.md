@@ -6,7 +6,7 @@ All notable changes to this project are documented here. Newest first.
 
 ## localbolt-app-v1.2.24-consumer-btr1-p3 — 2026-03-12
 
-**Commit:** (pending)
+**Commit:** ff33747
 
 CBTR-3: Enable Bolt Transfer Ratchet (BTR) in localbolt-app.
 
