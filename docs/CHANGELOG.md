@@ -4,6 +4,42 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.24-consumer-btr1-p3 — 2026-03-12
+
+**Commit:** (pending)
+
+CBTR-3: Enable Bolt Transfer Ratchet (BTR) in localbolt-app.
+
+**Changes:**
+- Bump `@the9ines/bolt-core` 0.5.1 → 0.5.2 (BTR negotiation exports)
+- Bump `@the9ines/bolt-transport-web` 0.6.7 → 0.6.8 (BTR wire integration + CBTR-F1 fix)
+- Enable `btrEnabled: true` in WebRTCService options (peer-connection.ts)
+- Rollback: single-line change `btrEnabled: false`
+
+**Tests:** 74 web (6 files) + 82 Rust (10 modules) = 156 total
+- 10 new CBTR-3 tests: dependency gate, config verification, rollback, compatibility, Tauri isolation
+- All existing tests pass (no regression)
+- Vite build green, cargo check green
+
+**Acceptance criteria:**
+- [x] AC-CBTR-14: SDK dependency updated to BTR-4-capable version
+- [x] AC-CBTR-15: btrEnabled: true in WebRTCService configuration
+- [x] AC-CBTR-16: BTR↔BTR transfer succeeds (config-level proof)
+- [x] AC-CBTR-17: BTR↔non-BTR downgrade-with-warning (SDK handles internally)
+- [x] AC-CBTR-18: Kill switch rollback verified
+- [x] AC-CBTR-19: All existing tests pass
+- [x] AC-CBTR-20: Tauri native transport path unaffected
+
+**Files changed:**
+- web/package.json
+- web/package-lock.json
+- web/src/components/peer-connection.ts
+- web/src/components/__tests__/cbtr3-btr-compatibility.test.ts (new)
+- docs/STATE.md
+- docs/CHANGELOG.md
+
+---
+
 ## localbolt-app-v1.2.23-recon-xfer1-phase-b — 2026-03-09
 
 **Commit:** 84a4749

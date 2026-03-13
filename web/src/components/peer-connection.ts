@@ -385,6 +385,7 @@ export function createPeerConnection(): HTMLElement {
         identityPublicKey: identity.publicKey,
         pinStore,
         onVerificationState: handleVerificationState,
+        btrEnabled: true,
       },
     );
     rtcService.setConnectionStateHandler(handleConnectionStateChange);

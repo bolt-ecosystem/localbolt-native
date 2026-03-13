@@ -6,18 +6,18 @@
 
 ## Latest Release
 
-- **Tag:** localbolt-app-v1.2.23-recon-xfer1-phase-b
-- **Commit:** 84a4749
-- **Date:** 2026-03-09
-- **Tests:** 64 web (5 files) + 82 Rust (10 modules) = 146 total
+- **Tag:** localbolt-app-v1.2.24-consumer-btr1-p3
+- **Commit:** (pending)
+- **Date:** 2026-03-12
+- **Tests:** 74 web (6 files) + 82 Rust (10 modules) = 156 total
 
 ## Dependencies (web/package.json)
 
 | Package | Version | Registry |
 |---------|---------|----------|
 | @tauri-apps/api | ^2.0.0 | npmjs.org |
-| @the9ines/bolt-core | 0.5.1 | npmjs.org |
-| @the9ines/bolt-transport-web | 0.6.4 | npmjs.org |
+| @the9ines/bolt-core | 0.5.2 | npmjs.org |
+| @the9ines/bolt-transport-web | 0.6.8 | npmjs.org |
 | @the9ines/localbolt-core | 0.1.2 | npmjs.org |
 | tweetnacl | ^1.0.3 |
 | tweetnacl-util | ^0.15.1 |
@@ -55,6 +55,7 @@
 - **Branch:** main
 - **Status:** Active
 - **Build:** Passing (vite)
-- **Tests:** 146 pass (64 web + 82 Rust)
+- **Tests:** 156 pass (74 web + 82 Rust)
+- **BTR:** Enabled (`btrEnabled: true`) — CBTR-3 rollout, burn-in active
 - **src-tauri:** N8 signal observability + N6-B3 GA wiring + support bundle + cross-platform IPC transport
 - **web:** unified health indicator, signal status subscription, daemon service, readiness gating
