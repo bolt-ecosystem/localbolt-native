@@ -4,7 +4,7 @@ import type { WatchdogState, SignalStatus } from '@/services/daemon';
 
 const DAEMON_STATUS_MAP: Record<WatchdogState, { dot: string; label: string }> = {
   starting: { dot: 'bg-yellow-500/70 animate-pulse', label: 'STARTING' },
-  ready: { dot: 'bg-neon/70 animate-pulse', label: 'ACTIVE' },
+  ready: { dot: 'bg-neon/70 animate-pulse', label: 'NEARBY' },
   restarting: { dot: 'bg-yellow-500/70 animate-pulse', label: 'RESTARTING' },
   degraded: { dot: 'bg-orange-500/70', label: 'DEGRADED' },
   incompatible: { dot: 'bg-red-500/70', label: 'INCOMPATIBLE' },
@@ -29,7 +29,7 @@ export function computeUnifiedStatus(
   // Daemon ready — reflect signal health in unified indicator
   switch (signalStatus) {
     case 'active':
-      return { dot: 'bg-neon/70 animate-pulse', label: 'HEALTHY' };
+      return { dot: 'bg-neon/70 animate-pulse', label: 'NEARBY' };
     case 'degraded':
       return { dot: 'bg-yellow-500/70 animate-pulse', label: 'SIG DEGRADED' };
     case 'offline':
