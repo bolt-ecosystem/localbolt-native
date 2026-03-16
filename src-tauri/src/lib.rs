@@ -20,16 +20,22 @@ use tauri::Manager;
 /// Spawn the embedded signaling server on a background thread.
 ///
 /// Runs on 0.0.0.0:3001 so other devices on the LAN can connect.
+/// Panic-guarded: thread panic is caught and logged, does not crash the app.
 fn start_embedded_signal_server() {
     std::thread::spawn(|| {
-        let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-        rt.block_on(async {
-            let addr: SocketAddr = "0.0.0.0:3001".parse().unwrap();
-            let server = SignalingServer::new(addr);
-            if let Err(e) = server.run().await {
-                eprintln!("[signal] server error: {e}");
-            }
+        let result = std::panic::catch_unwind(|| {
+            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+            rt.block_on(async {
+                let addr: SocketAddr = "0.0.0.0:3001".parse().unwrap();
+                let server = SignalingServer::new(addr);
+                if let Err(e) = server.run().await {
+                    eprintln!("[signal] server error: {e}");
+                }
+            });
         });
+        if let Err(e) = result {
+            eprintln!("[signal] PANIC caught in signaling server thread: {e:?}");
+        }
     });
 }
 

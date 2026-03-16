@@ -397,4 +397,105 @@ mod tests {
         let json = serde_json::to_string(&WatchdogState::Incompatible).unwrap();
         assert_eq!(json, "\"incompatible\"");
     }
+
+    /// Reconnect stress drill: 10 connect/disconnect/reconnect cycles.
+    /// Asserts no stuck state and deterministic behavior at every step.
+    #[test]
+    fn reconnect_stress_10_cycles() {
+        let mut w = Watchdog::new();
+
+        for cycle in 0..10 {
+            // Connect
+            let t = w.on_daemon_ready();
+            assert_eq!(
+                w.state(),
+                WatchdogState::Ready,
+                "cycle {cycle}: should be ready after on_daemon_ready"
+            );
+
+            // Simulate 60s stable to reset retries (via direct field set)
+            w.ready_since = Some(Instant::now() - RETRY_RESET_WINDOW - Duration::from_secs(1));
+            w.maybe_reset_retries();
+            assert_eq!(w.retry_count(), 0, "cycle {cycle}: retries should reset");
+
+            // Disconnect (daemon exit)
+            let delay = w.on_daemon_exit(Some(0));
+            assert!(delay.is_some(), "cycle {cycle}: should get restart delay");
+            assert_eq!(
+                w.state(),
+                WatchdogState::Restarting,
+                "cycle {cycle}: should be restarting"
+            );
+        }
+
+        // After 10 cycles with retry resets, should never reach degraded
+        assert_ne!(w.state(), WatchdogState::Degraded);
+    }
+
+    /// Rapid crash without stable window: hits degraded deterministically.
+    #[test]
+    fn rapid_crash_no_stable_window_degrades() {
+        let mut w = Watchdog::new();
+        w.on_daemon_ready();
+
+        // 3 rapid exits without stable ready window
+        for i in 0..3 {
+            w.on_daemon_exit(Some(1));
+            if i < 2 {
+                w.on_daemon_ready(); // restart succeeds but crashes again immediately
+            }
+        }
+
+        // 4th exit should degrade
+        let delay = w.on_daemon_exit(Some(1));
+        assert!(delay.is_none(), "should be degraded, no more restarts");
+        assert_eq!(w.state(), WatchdogState::Degraded);
+    }
+
+    /// Manual restart from degraded + full recovery cycle.
+    #[test]
+    fn degraded_manual_restart_full_recovery() {
+        let mut w = Watchdog::new();
+        w.on_spawn_failure("test");
+        assert_eq!(w.state(), WatchdogState::Degraded);
+
+        // Manual restart
+        w.manual_restart();
+        assert_eq!(w.state(), WatchdogState::Starting);
+        assert_eq!(w.retry_count(), 0);
+
+        // Recovery
+        w.on_daemon_ready();
+        assert_eq!(w.state(), WatchdogState::Ready);
+    }
+
+    /// No stuck state: every state has at least one valid transition out.
+    #[test]
+    fn no_stuck_state() {
+        // Starting -> Ready or Restarting (via timeout)
+        let mut w = Watchdog::new();
+        assert_eq!(w.state(), WatchdogState::Starting);
+        w.on_daemon_ready();
+        assert_eq!(w.state(), WatchdogState::Ready);
+
+        // Ready -> Restarting (via exit)
+        w.on_daemon_exit(Some(0));
+        assert_eq!(w.state(), WatchdogState::Restarting);
+
+        // Restarting -> Ready (via daemon_ready)
+        w.on_daemon_ready();
+        assert_eq!(w.state(), WatchdogState::Ready);
+
+        // Degraded -> Starting (via manual restart)
+        w.on_spawn_failure("test");
+        assert_eq!(w.state(), WatchdogState::Degraded);
+        w.manual_restart();
+        assert_eq!(w.state(), WatchdogState::Starting);
+
+        // Incompatible is intentionally terminal
+        w.on_version_incompatible();
+        assert_eq!(w.state(), WatchdogState::Incompatible);
+        let t = w.manual_restart();
+        assert_eq!(t, Transition::Unchanged); // terminal by design
+    }
 }
