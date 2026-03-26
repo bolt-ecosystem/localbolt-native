@@ -29,25 +29,9 @@ jobs:
       - run: cargo test
       - run: cargo build --release
 
-  tauri-app:
-    name: Tauri App (Rust)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src-tauri
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
-        with:
-          workspaces: src-tauri
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - run: cargo fmt --check
-      - run: cargo clippy -- -D warnings
-      - run: cargo test
+  # Tauri App (Rust) job removed — src-tauri is frozen (last release v1.2.24).
+  # Native shell direction is SwiftUI/FFI (native/shared + native/macos).
+  # Tauri CI will be replaced with native shell CI when that work resumes.
 
   web-app:
     name: Web App (TypeScript)

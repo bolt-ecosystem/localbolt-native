@@ -1,10 +1,14 @@
 # LocalBolt App
 
-Native desktop app for [LocalBolt](https://localbolt.app). Encrypted peer-to-peer file transfer with an embedded signaling server.
+Native desktop app for [LocalBolt](https://localbolt.app). Encrypted peer-to-peer file transfer.
 
-Built with [Tauri v2](https://tauri.app). No browser needed. Open the app and start transferring.
+## Current State
 
-## Download
+The Tauri v2 implementation is **frozen** — the last published release (v1.2.24) was built with Tauri. The architecture has moved to a native shell direction (SwiftUI on macOS, platform-native on other OSes) consuming a shared Rust core (`bolt-app-core`) via FFI. The current production desktop shell is `bolt-ui` (egui) in `bolt-core-sdk`.
+
+See `docs/STATE.md` for detailed current state.
+
+## Download (Last Tauri Release)
 
 | Platform | Download |
 |----------|----------|
@@ -16,68 +20,32 @@ Built with [Tauri v2](https://tauri.app). No browser needed. Open the app and st
 > **macOS:** Right-click the app, click Open, then click Open again to bypass Gatekeeper.
 > **Windows:** Click "More info" then "Run anyway" on the SmartScreen prompt.
 
-## Features
-
-- **Embedded signal server** - starts automatically with the app, no setup required
-- **Dual signaling** - discovers devices on your LAN and across the internet simultaneously
-- **NaCl/Curve25519 encryption** - same crypto as Signal and WireGuard
-- **WebRTC P2P transfer** - files go directly between devices, never stored on any server
-- **Cross-discovery** - finds devices running the website, the desktop app, or the self-hosted version
-- **Works offline** - LAN discovery works with no internet connection
-
-## Build from Source
-
-```bash
-cd web && npm install && npx vite build
-cd ../src-tauri && cargo tauri dev
-```
-
-### Production build
-
-```bash
-cd web && npm install && npx vite build
-cd ../src-tauri && cargo tauri build
-```
-
-Produces platform-specific installers: `.app`/`.dmg` (macOS), `.msi`/`.exe` (Windows), `.deb`/`.AppImage` (Linux).
-
 ## Structure
 
 ```
 localbolt-app/
-├── web/           # Frontend (Vanilla TypeScript, Tailwind, Vite)
-├── signal/        # Rust signal server crate
-├── src-tauri/     # Tauri v2 app shell
-│   ├── src/
-│   │   ├── lib.rs     # Embedded signal server + Tauri setup
-│   │   └── main.rs    # Entry point
-│   └── tauri.conf.json
+├── web/           # Frontend (Vanilla TypeScript, Tailwind, Vite) — Tauri era, frozen
+├── signal/        # Rust signal server crate (vendored bolt-rendezvous)
+├── src-tauri/     # Tauri v2 app shell — frozen, last release v1.2.24
+├── native/
+│   ├── shared/    # Rust C-ABI FFI bridge (libbolt_native_bridge.a)
+│   └── macos/     # SwiftUI shell scaffold (daemon lifecycle, signaling)
 └── README.md
 ```
 
-## How It Works
-
-When you launch the app:
-
-1. The embedded Rust signal server starts on port 3001
-2. The web frontend loads in a native webview
-3. `DualSignaling` connects to both `ws://localhost:3001` (local) and `wss://localbolt-signal.fly.dev` (cloud)
-4. Devices from both sources appear in the device list
-5. Select a device, approve the connection, and transfer files
-
 ## Ecosystem
 
-LocalBolt App is part of the [Bolt Protocol](https://github.com/the9ines/bolt-protocol) ecosystem. See [PRD.md](PRD.md) and [ROADMAP.md](ROADMAP.md) in this repo for product requirements and roadmap.
+LocalBolt App is part of the [Bolt Protocol](https://github.com/the9ines/bolt-protocol) ecosystem.
 
 | Relationship | Repository |
 |-------------|-----------|
-| Ecosystem governance (mirror) | [bolt-ecosystem](https://github.com/the9ines/bolt-ecosystem) |
+| Ecosystem governance | [bolt-ecosystem](https://github.com/the9ines/bolt-ecosystem) |
 | Protocol spec | [bolt-protocol](https://github.com/the9ines/bolt-protocol) |
-| SDK dependency | [bolt-core-sdk](https://github.com/the9ines/bolt-core-sdk) |
-| Bundles (subtree) | [bolt-rendezvous](https://github.com/the9ines/bolt-rendezvous) |
-| Bundles | [bolt-daemon](https://github.com/the9ines/bolt-daemon) |
-| Lite web version | [localbolt](https://github.com/the9ines/localbolt) |
+| SDK (Rust) | [bolt-core-sdk](https://github.com/the9ines/bolt-core-sdk) |
+| Daemon | [bolt-daemon](https://github.com/the9ines/bolt-daemon) |
+| Signal server (subtree) | [bolt-rendezvous](https://github.com/the9ines/bolt-rendezvous) |
 | Web app | [localbolt-v3](https://github.com/the9ines/localbolt-v3) |
+| Self-hosted | [localbolt](https://github.com/the9ines/localbolt) |
 
 This is an **open-source** project. Free to use, build, and modify.
 
