@@ -98,6 +98,34 @@ uint32_t bolt_signaling_drain_events(BoltSignaling* handle);
 /// Stop signaling and free the handle.
 void bolt_signaling_stop(BoltSignaling* handle);
 
+// ── IPC Bridge (daemon event stream) ────────────────────────
+
+/// Opaque IPC bridge handle.
+typedef struct BoltIpc BoltIpc;
+
+/// Start IPC bridge to daemon. Connects, handshakes, starts event loop.
+/// socket_path: daemon IPC socket path (C string).
+/// app_version: app version string for handshake (C string).
+/// Returns opaque handle or null on failure.
+BoltIpc* bolt_ipc_start(const char* socket_path, const char* app_version);
+
+/// Check if IPC bridge is connected. Returns 1 if connected, 0 if not.
+int bolt_ipc_is_connected(BoltIpc* handle);
+
+/// Drain pending events as newline-separated JSON.
+/// Each line: {"event": "...", "payload": {...}}
+/// Returns null if no events. Caller must free with bolt_free_string.
+char* bolt_ipc_drain_events(BoltIpc* handle);
+
+/// Send a decision to the daemon.
+/// msg_type: IPC message type (e.g. "pairing.decision").
+/// payload_json: JSON string with decision payload.
+/// Returns 1 on success, 0 on failure.
+int bolt_ipc_send_decision(BoltIpc* handle, const char* msg_type, const char* payload_json);
+
+/// Stop IPC bridge and free the handle.
+void bolt_ipc_stop(BoltIpc* handle);
+
 #ifdef __cplusplus
 }
 #endif

@@ -224,3 +224,126 @@ final class SignalingManager {
         stop()
     }
 }
+
+// ── IPC Bridge (daemon event stream) ────────────────────────
+
+/// An incoming pairing request from a remote peer via daemon IPC.
+struct PairingRequest: Identifiable {
+    let id: String // request_id
+    let requestId: String
+    let deviceName: String
+    let deviceType: String
+    let sas: String
+}
+
+/// Manages IPC connection to the daemon for event forwarding and decisions.
+@Observable
+final class IpcManager {
+    private(set) var isConnected = false
+    var pendingRequest: PairingRequest?
+
+    private var handle: OpaquePointer?
+    private var pollTimer: Timer?
+
+    /// Connect to daemon IPC socket.
+    func start(socketPath: String, appVersion: String = "0.1.0") {
+        guard handle == nil else { return }
+
+        handle = socketPath.withCString { pathCStr in
+            appVersion.withCString { verCStr in
+                bolt_ipc_start(pathCStr, verCStr)
+            }
+        }
+
+        guard handle != nil else {
+            print("[IPC] start failed — daemon socket not available")
+            return
+        }
+
+        isConnected = true
+
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+            self?.poll()
+        }
+    }
+
+    /// Stop IPC bridge.
+    func stop() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+
+        if let h = handle {
+            bolt_ipc_stop(h)
+            handle = nil
+        }
+
+        isConnected = false
+        pendingRequest = nil
+    }
+
+    /// Send a pairing decision back to the daemon.
+    func sendPairingDecision(requestId: String, accept: Bool) {
+        guard let h = handle else { return }
+
+        let decision = accept ? "allow_once" : "deny_once"
+        let payload = """
+        {"request_id":"\(requestId)","decision":"\(decision)"}
+        """
+
+        payload.withCString { payloadCStr in
+            "pairing.decision".withCString { typeCStr in
+                let _ = bolt_ipc_send_decision(h, typeCStr, payloadCStr)
+            }
+        }
+
+        // Clear the pending request after decision
+        pendingRequest = nil
+    }
+
+    private func poll() {
+        guard let h = handle else { return }
+
+        // Check connection
+        let connected = bolt_ipc_is_connected(h) == 1
+        if connected != isConnected {
+            isConnected = connected
+        }
+
+        // Drain events
+        guard let ptr = bolt_ipc_drain_events(h) else { return }
+        let raw = String(cString: ptr)
+        bolt_free_string(ptr)
+
+        // Parse newline-separated JSON events
+        for line in raw.split(separator: "\n") {
+            guard let data = line.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let event = json["event"] as? String,
+                  let payload = json["payload"] as? [String: Any]
+            else { continue }
+
+            switch event {
+            case "daemon://pairing-request":
+                let req = PairingRequest(
+                    id: payload["request_id"] as? String ?? UUID().uuidString,
+                    requestId: payload["request_id"] as? String ?? "",
+                    deviceName: payload["remote_device_name"] as? String ?? "Unknown Device",
+                    deviceType: payload["remote_device_type"] as? String ?? "desktop",
+                    sas: payload["sas"] as? String ?? ""
+                )
+                pendingRequest = req
+
+            case "daemon://bridge-disconnected":
+                isConnected = false
+                stop()
+
+            default:
+                break
+            }
+        }
+    }
+
+    deinit {
+        stop()
+    }
+}

@@ -27,8 +27,10 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 mod daemon;
+mod ipc;
 mod signaling;
 pub use daemon::*;
+pub use ipc::*;
 pub use signaling::*;
 
 /// Generate a secure peer code. Caller must free with `bolt_free_string`.
