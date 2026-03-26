@@ -79,8 +79,7 @@ struct ContentView: View {
                                 }
                                 // Connect IPC after daemon socket is ready
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                    let socketPath = "/tmp/bolt-native-\(daemon.pid).sock"
-                                    ipc.start(socketPath: socketPath)
+                                    ipc.start(socketPath: daemon.socketPath)
                                 }
                             }
                         }) {
@@ -161,11 +160,14 @@ struct ContentView: View {
                                     }
                                     Spacer()
                                     Button("Connect") {
-                                        // NS1-P2: outbound connection initiation
+                                        signaling.sendSignal(
+                                            toPeerCode: peer.peerCode,
+                                            signalType: "connect-request"
+                                        )
                                     }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
-                                    .disabled(true) // Deferred to NS1-P2
+                                    .disabled(!ipc.isConnected)
                                 }
                                 .padding(.vertical, 4)
                             }

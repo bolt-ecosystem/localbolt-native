@@ -14,6 +14,7 @@ pub struct BoltDaemon {
     stderr_lines: Arc<Mutex<Vec<String>>>,
     ws_port: u16,
     data_dir: String,
+    socket_path: String,
 }
 
 /// Find the bolt-daemon binary. Searches known paths.
@@ -122,6 +123,7 @@ pub unsafe extern "C" fn bolt_daemon_start(
         stderr_lines,
         ws_port: port,
         data_dir,
+        socket_path,
     }))
 }
 
@@ -179,6 +181,19 @@ pub unsafe extern "C" fn bolt_daemon_recent_stderr(
     let start = lines.len().saturating_sub(n);
     let joined = lines[start..].join("\n");
     CString::new(joined).map(|cs| cs.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Get the daemon's IPC socket path. Caller must free with `bolt_free_string`.
+///
+/// # Safety
+/// `handle` must be a valid pointer returned by `bolt_daemon_start`.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_daemon_socket_path(handle: *mut BoltDaemon) -> *mut c_char {
+    if handle.is_null() { return std::ptr::null_mut(); }
+    let daemon = &*handle;
+    CString::new(daemon.socket_path.as_str())
+        .map(|cs| cs.into_raw())
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// Stop the daemon and free the handle.

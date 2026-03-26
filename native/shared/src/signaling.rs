@@ -226,6 +226,38 @@ pub unsafe extern "C" fn bolt_signaling_drain_events(handle: *mut BoltSignaling)
     count
 }
 
+/// Send a signal to a peer (connection initiation).
+/// `to_peer_code` — target peer code (C string).
+/// `signal_type` — signal type string (C string, e.g. "connect-request").
+/// `data_json` — JSON payload string (C string), or null for empty object.
+/// Returns 1 on success, 0 on failure.
+///
+/// # Safety
+/// `handle` must be valid. String parameters must be null-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_signaling_send_signal(
+    handle: *mut BoltSignaling,
+    to_peer_code: *const c_char,
+    signal_type: *const c_char,
+    data_json: *const c_char,
+) -> i32 {
+    if handle.is_null() || to_peer_code.is_null() || signal_type.is_null() {
+        return 0;
+    }
+    let sig = &*handle;
+    let to = cstr_to_string(to_peer_code);
+    let sig_type = cstr_to_string(signal_type);
+    let data: serde_json::Value = if data_json.is_null() {
+        serde_json::json!({})
+    } else {
+        let json_str = cstr_to_string(data_json);
+        serde_json::from_str(&json_str).unwrap_or(serde_json::json!({}))
+    };
+
+    sig.handle.send_signal(&to, &sig_type, data, &sig.peer_code);
+    1
+}
+
 /// Stop signaling and free the handle.
 ///
 /// # Safety

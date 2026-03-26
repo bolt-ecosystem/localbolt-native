@@ -56,6 +56,9 @@ uint32_t bolt_daemon_pid(BoltDaemon* handle);
 /// Caller must free with bolt_free_string.
 char* bolt_daemon_recent_stderr(BoltDaemon* handle, uint32_t last_n);
 
+/// Get the daemon's IPC socket path. Caller must free with bolt_free_string.
+char* bolt_daemon_socket_path(BoltDaemon* handle);
+
 /// Stop the daemon and free the handle.
 /// After this call, handle is invalid.
 void bolt_daemon_stop(BoltDaemon* handle);
@@ -94,6 +97,16 @@ int bolt_signaling_is_connected(BoltSignaling* handle);
 
 /// Drain pending events (returns count). Read peer list after draining.
 uint32_t bolt_signaling_drain_events(BoltSignaling* handle);
+
+/// Send a signal to a peer (connection initiation).
+/// data_json may be null for empty payload.
+/// Returns 1 on success, 0 on failure.
+int bolt_signaling_send_signal(
+    BoltSignaling* handle,
+    const char* to_peer_code,
+    const char* signal_type,
+    const char* data_json
+);
 
 /// Stop signaling and free the handle.
 void bolt_signaling_stop(BoltSignaling* handle);

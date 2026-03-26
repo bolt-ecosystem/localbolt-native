@@ -53,6 +53,7 @@ final class DaemonManager {
     private(set) var pid: UInt32 = 0
     private(set) var wsPort: UInt16 = 0
     private(set) var recentStderr: String = ""
+    private(set) var socketPath: String = ""
     private(set) var daemonBinaryPath: String?
 
     private var handle: OpaquePointer?
@@ -76,6 +77,10 @@ final class DaemonManager {
 
         pid = bolt_daemon_pid(handle)
         self.wsPort = bolt_daemon_ws_port(handle)
+        if let ptr = bolt_daemon_socket_path(handle) {
+            socketPath = String(cString: ptr)
+            bolt_free_string(ptr)
+        }
         isRunning = true
 
         // Poll stderr every 500ms
@@ -99,6 +104,7 @@ final class DaemonManager {
         isRunning = false
         pid = 0
         wsPort = 0
+        socketPath = ""
         recentStderr = ""
     }
 
@@ -177,6 +183,23 @@ final class SignalingManager {
         // Poll for peer updates every 500ms
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.poll()
+        }
+    }
+
+    /// Send a signal to a peer (connection initiation).
+    func sendSignal(toPeerCode: String, signalType: String, dataJson: String? = nil) {
+        guard let h = handle else { return }
+
+        toPeerCode.withCString { toCStr in
+            signalType.withCString { typeCStr in
+                if let json = dataJson {
+                    json.withCString { dataCStr in
+                        let _ = bolt_signaling_send_signal(h, toCStr, typeCStr, dataCStr)
+                    }
+                } else {
+                    let _ = bolt_signaling_send_signal(h, toCStr, typeCStr, nil)
+                }
+            }
         }
     }
 
