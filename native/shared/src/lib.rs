@@ -20,7 +20,14 @@
 //! - `bolt_free_string` — free a string returned by any bolt_ function
 
 use std::ffi::{CStr, CString};
+use std::io::{BufRead, BufReader};
 use std::os::raw::c_char;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
+
+mod daemon;
+pub use daemon::*;
 
 /// Generate a secure peer code. Caller must free with `bolt_free_string`.
 #[no_mangle]

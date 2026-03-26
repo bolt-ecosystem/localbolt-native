@@ -6,9 +6,13 @@
 #ifndef BOLT_NATIVE_BRIDGE_H
 #define BOLT_NATIVE_BRIDGE_H
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// ── Platform / Identity ─────────────────────────────────────
 
 /// Generate a secure peer code. Caller must free with bolt_free_string.
 char* bolt_generate_peer_code(void);
@@ -24,6 +28,37 @@ int bolt_probe_signal_health(void);
 
 /// Free a string returned by any bolt_ function.
 void bolt_free_string(char* ptr);
+
+// ── Daemon Lifecycle ────────────────────────────────────────
+
+/// Opaque daemon handle.
+typedef struct BoltDaemon BoltDaemon;
+
+/// Find the bolt-daemon binary. Returns null if not found.
+/// Caller must free with bolt_free_string.
+char* bolt_daemon_find_binary(void);
+
+/// Start a daemon process. Returns opaque handle, or null on failure.
+/// daemon_bin: path to bolt-daemon binary (C string).
+/// ws_port: port for WS endpoint (0 = auto-assign).
+BoltDaemon* bolt_daemon_start(const char* daemon_bin, uint16_t ws_port);
+
+/// Check if daemon is running. Returns 1 if running, 0 if not.
+int bolt_daemon_is_running(BoltDaemon* handle);
+
+/// Get the daemon's WS port.
+uint16_t bolt_daemon_ws_port(BoltDaemon* handle);
+
+/// Get the daemon's PID.
+uint32_t bolt_daemon_pid(BoltDaemon* handle);
+
+/// Get recent stderr lines (last N, newline-separated).
+/// Caller must free with bolt_free_string.
+char* bolt_daemon_recent_stderr(BoltDaemon* handle, uint32_t last_n);
+
+/// Stop the daemon and free the handle.
+/// After this call, handle is invalid.
+void bolt_daemon_stop(BoltDaemon* handle);
 
 #ifdef __cplusplus
 }
