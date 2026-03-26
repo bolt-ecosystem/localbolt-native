@@ -60,6 +60,44 @@ char* bolt_daemon_recent_stderr(BoltDaemon* handle, uint32_t last_n);
 /// After this call, handle is invalid.
 void bolt_daemon_stop(BoltDaemon* handle);
 
+// ── Signaling / Peer Discovery ───────────────────────────────
+
+/// Opaque signaling handle.
+typedef struct BoltSignaling BoltSignaling;
+
+/// Discovered peer.
+typedef struct {
+    char* peer_code;
+    char* device_name;
+    char* device_type;
+} BoltPeer;
+
+/// Start signaling client. cloud_url may be null.
+BoltSignaling* bolt_signaling_start(
+    const char* local_url,
+    const char* cloud_url,
+    const char* peer_code,
+    const char* device_name
+);
+
+/// Number of currently discovered peers.
+uint32_t bolt_signaling_peer_count(BoltSignaling* handle);
+
+/// Get peer by index. Caller must free with bolt_peer_free.
+BoltPeer* bolt_signaling_get_peer(BoltSignaling* handle, uint32_t index);
+
+/// Free a peer returned by bolt_signaling_get_peer.
+void bolt_peer_free(BoltPeer* peer);
+
+/// Check if connected to at least one signaling plane.
+int bolt_signaling_is_connected(BoltSignaling* handle);
+
+/// Drain pending events (returns count). Read peer list after draining.
+uint32_t bolt_signaling_drain_events(BoltSignaling* handle);
+
+/// Stop signaling and free the handle.
+void bolt_signaling_stop(BoltSignaling* handle);
+
 #ifdef __cplusplus
 }
 #endif

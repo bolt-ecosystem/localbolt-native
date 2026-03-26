@@ -130,3 +130,97 @@ final class DaemonManager {
         stop()
     }
 }
+
+// ── Signaling / Peer Discovery ──────────────────────────────
+
+/// A discovered peer device.
+struct DiscoveredPeer: Identifiable {
+    let id: String // peer_code
+    let peerCode: String
+    let deviceName: String
+    let deviceType: String
+}
+
+/// Manages signaling client and peer discovery via FFI.
+@Observable
+final class SignalingManager {
+    private(set) var isConnected = false
+    private(set) var peers: [DiscoveredPeer] = []
+    private(set) var peerCode: String
+
+    private var handle: OpaquePointer?
+    private var pollTimer: Timer?
+
+    init(peerCode: String) {
+        self.peerCode = peerCode
+    }
+
+    /// Start signaling with local + optional cloud server.
+    func start(localUrl: String, cloudUrl: String?) {
+        guard handle == nil else { return }
+
+        handle = peerCode.withCString { codeCStr in
+            localUrl.withCString { localCStr in
+                let deviceName = Host.current().localizedName ?? "Mac"
+                return deviceName.withCString { nameCStr in
+                    if let cloud = cloudUrl {
+                        return cloud.withCString { cloudCStr in
+                            bolt_signaling_start(localCStr, cloudCStr, codeCStr, nameCStr)
+                        }
+                    } else {
+                        return bolt_signaling_start(localCStr, nil, codeCStr, nameCStr)
+                    }
+                }
+            }
+        }
+
+        // Poll for peer updates every 500ms
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.poll()
+        }
+    }
+
+    /// Stop signaling.
+    func stop() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+        if let h = handle {
+            bolt_signaling_stop(h)
+            handle = nil
+        }
+        isConnected = false
+        peers = []
+    }
+
+    private func poll() {
+        guard let h = handle else { return }
+
+        isConnected = bolt_signaling_is_connected(h) == 1
+
+        // Drain events to keep the queue clean
+        let _ = bolt_signaling_drain_events(h)
+
+        // Read current peer list
+        let count = bolt_signaling_peer_count(h)
+        var updated: [DiscoveredPeer] = []
+        for i in 0..<count {
+            if let peerPtr = bolt_signaling_get_peer(h, i) {
+                let peer = peerPtr.pointee
+                let code = peer.peer_code.map { String(cString: $0) } ?? ""
+                let name = peer.device_name.map { String(cString: $0) } ?? ""
+                let type = peer.device_type.map { String(cString: $0) } ?? ""
+                updated.append(DiscoveredPeer(
+                    id: code, peerCode: code, deviceName: name, deviceType: type
+                ))
+                bolt_peer_free(peerPtr)
+            }
+        }
+        if updated.count != peers.count || !updated.map(\.id).elementsEqual(peers.map(\.id)) {
+            peers = updated
+        }
+    }
+
+    deinit {
+        stop()
+    }
+}
