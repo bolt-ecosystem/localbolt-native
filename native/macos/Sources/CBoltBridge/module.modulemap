@@ -1,0 +1,5 @@
+module CBoltBridge {
+    header "../../../shared/include/bolt_native_bridge.h"
+    link "bolt_native_bridge"
+    export *
+}
