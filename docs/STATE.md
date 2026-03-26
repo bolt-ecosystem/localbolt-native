@@ -57,5 +57,6 @@
 - **Build:** Passing (vite)
 - **Tests:** 156 pass (74 web + 82 Rust)
 - **BTR:** Enabled (`btrEnabled: true`) — CBTR-3 rollout, burn-in active
-- **src-tauri:** N8 signal observability + N6-B3 GA wiring + support bundle + cross-platform IPC transport
-- **web:** unified health indicator, signal status subscription, daemon service, readiness gating
+- **src-tauri:** **Retired.** Tauri desktop path replaced by bolt-ui (current) and native SwiftUI shell (future).
+- **native/shared:** Rust C-ABI FFI bridge to bolt-app-core. Produces libbolt_native_bridge.a.
+- **native/macos:** SwiftUI shell scaffold. Daemon lifecycle + signaling/peer discovery via FFI.
