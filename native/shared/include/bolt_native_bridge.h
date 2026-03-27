@@ -59,6 +59,13 @@ char* bolt_daemon_recent_stderr(BoltDaemon* handle, uint32_t last_n);
 /// Get the daemon's IPC socket path. Caller must free with bolt_free_string.
 char* bolt_daemon_socket_path(BoltDaemon* handle);
 
+/// Get the daemon's data directory. Caller must free with bolt_free_string.
+char* bolt_daemon_data_dir(BoltDaemon* handle);
+
+/// Trigger a file send via the daemon. file_path must be absolute.
+/// Returns 1 on success, 0 on failure.
+int bolt_daemon_send_file(BoltDaemon* handle, const char* file_path);
+
 /// Stop the daemon and free the handle.
 /// After this call, handle is invalid.
 void bolt_daemon_stop(BoltDaemon* handle);

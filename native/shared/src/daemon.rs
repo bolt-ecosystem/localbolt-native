@@ -196,6 +196,49 @@ pub unsafe extern "C" fn bolt_daemon_socket_path(handle: *mut BoltDaemon) -> *mu
         .unwrap_or(std::ptr::null_mut())
 }
 
+/// Get the daemon's data directory. Caller must free with `bolt_free_string`.
+///
+/// # Safety
+/// `handle` must be a valid pointer returned by `bolt_daemon_start`.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_daemon_data_dir(handle: *mut BoltDaemon) -> *mut c_char {
+    if handle.is_null() { return std::ptr::null_mut(); }
+    let daemon = &*handle;
+    CString::new(daemon.data_dir.as_str())
+        .map(|cs| cs.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
+
+/// Trigger a file send via the daemon's send_file.signal mechanism.
+/// `file_path` — absolute path to the file to send (C string).
+/// Returns 1 on success, 0 on failure.
+///
+/// # Safety
+/// `handle` must be valid. `file_path` must be a null-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_daemon_send_file(
+    handle: *mut BoltDaemon,
+    file_path: *const c_char,
+) -> i32 {
+    if handle.is_null() || file_path.is_null() { return 0; }
+    let daemon = &*handle;
+    let path = match CStr::from_ptr(file_path).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let signal_path = format!("{}/send_file.signal", daemon.data_dir);
+    match std::fs::write(&signal_path, path) {
+        Ok(()) => {
+            eprintln!("[NATIVE_BRIDGE] wrote send_file.signal: {path}");
+            1
+        }
+        Err(e) => {
+            eprintln!("[NATIVE_BRIDGE] failed to write send_file.signal: {e}");
+            0
+        }
+    }
+}
+
 /// Stop the daemon and free the handle.
 ///
 /// # Safety

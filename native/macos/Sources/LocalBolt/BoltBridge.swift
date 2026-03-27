@@ -54,6 +54,7 @@ final class DaemonManager {
     private(set) var wsPort: UInt16 = 0
     private(set) var recentStderr: String = ""
     private(set) var socketPath: String = ""
+    private(set) var dataDir: String = ""
     private(set) var daemonBinaryPath: String?
 
     private var handle: OpaquePointer?
@@ -81,6 +82,10 @@ final class DaemonManager {
             socketPath = String(cString: ptr)
             bolt_free_string(ptr)
         }
+        if let ptr = bolt_daemon_data_dir(handle) {
+            dataDir = String(cString: ptr)
+            bolt_free_string(ptr)
+        }
         isRunning = true
 
         // Poll stderr every 500ms
@@ -105,7 +110,17 @@ final class DaemonManager {
         pid = 0
         wsPort = 0
         socketPath = ""
+        dataDir = ""
         recentStderr = ""
+    }
+
+    /// Send a file to the connected peer via daemon.
+    @discardableResult
+    func sendFile(path: String) -> Bool {
+        guard let h = handle else { return false }
+        return path.withCString { cPath in
+            bolt_daemon_send_file(h, cPath) == 1
+        }
     }
 
     /// Poll daemon state (called on timer).
@@ -282,6 +297,15 @@ enum SessionPhase: Equatable {
     case disconnected(reason: String)
 }
 
+/// Transfer lifecycle phase.
+enum TransferPhase: Equatable {
+    case idle
+    case sending(fileName: String, transferId: String)
+    case receiving(fileName: String, transferId: String)
+    case complete(fileName: String, savePath: String?)
+    case failed(fileName: String, reason: String)
+}
+
 /// Manages IPC connection to the daemon for event forwarding and decisions.
 @Observable
 final class IpcManager {
@@ -290,6 +314,7 @@ final class IpcManager {
     private(set) var sessionPhase: SessionPhase = .idle
     private(set) var connectedPeer: PeerSession?
     private(set) var connectedPeerCount: UInt32 = 0
+    var transferPhase: TransferPhase = .idle
 
     private var handle: OpaquePointer?
     private var pollTimer: Timer?
@@ -331,6 +356,7 @@ final class IpcManager {
         sessionPhase = .idle
         connectedPeer = nil
         connectedPeerCount = 0
+        transferPhase = .idle
     }
 
     /// Send a pairing decision back to the daemon.
@@ -366,6 +392,11 @@ final class IpcManager {
     /// Mark the current session as verified (user confirmed SAS match).
     func markVerified() {
         connectedPeer?.trust = .verified
+    }
+
+    /// Clear transfer state back to idle.
+    func clearTransfer() {
+        transferPhase = .idle
     }
 
     /// Reset session phase to idle (dismiss disconnected notice).
@@ -464,6 +495,30 @@ final class IpcManager {
                 let reason = payload["reason"] as? String ?? "unknown"
                 sessionPhase = .disconnected(reason: reason)
                 connectedPeer = nil
+
+            case "daemon://transfer-started":
+                let fileName = payload["file_name"] as? String ?? "file"
+                let transferId = payload["transfer_id"] as? String ?? ""
+                let direction = payload["direction"] as? String ?? "send"
+                if direction == "receive" {
+                    transferPhase = .receiving(fileName: fileName, transferId: transferId)
+                } else {
+                    transferPhase = .sending(fileName: fileName, transferId: transferId)
+                }
+
+            case "daemon://transfer-complete":
+                let fileName = payload["file_name"] as? String ?? "file"
+                let savePath = payload["save_path"] as? String
+                transferPhase = .complete(fileName: fileName, savePath: savePath)
+
+            case "daemon://transfer-error":
+                let fileName = payload["file_name"] as? String ?? "file"
+                let reason = payload["reason"] as? String ?? "unknown"
+                transferPhase = .failed(fileName: fileName, reason: reason)
+
+            case "daemon://transfer-request":
+                // Incoming file transfer request — handled through pairing flow for now
+                break
 
             case "daemon://bridge-disconnected":
                 isConnected = false

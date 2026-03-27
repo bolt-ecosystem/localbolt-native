@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -186,6 +187,13 @@ struct ContentView: View {
                                 Text("Connected to \(peer.deviceName)")
                                     .font(.system(size: 13, weight: .semibold))
                                 Spacer()
+                                Button("Send File") {
+                                    pickAndSendFile()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .tint(.green)
+                                .disabled(ipc.transferPhase != .idle)
                                 Button("Disconnect") {
                                     ipc.disconnectSession()
                                 }
@@ -230,6 +238,64 @@ struct ContentView: View {
                                         .foregroundColor(.secondary)
                                 }
                             }
+
+                            // Transfer status
+                            Group {
+                            switch ipc.transferPhase {
+                            case .sending(let fileName, _):
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .scaleEffect(0.6)
+                                    Text("Sending \(fileName)...")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                }
+                            case .receiving(let fileName, _):
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .scaleEffect(0.6)
+                                    Text("Receiving \(fileName)...")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                }
+                            case .complete(let fileName, let savePath):
+                                HStack(spacing: 8) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                    Text("\(fileName) complete")
+                                        .font(.system(size: 11))
+                                    Spacer()
+                                    if let path = savePath {
+                                        Button("Reveal") {
+                                            NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.mini)
+                                    }
+                                    Button("Dismiss") {
+                                        ipc.clearTransfer()
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+                                }
+                            case .failed(let fileName, let reason):
+                                HStack(spacing: 8) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
+                                    Text("\(fileName) failed: \(reason)")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Button("Dismiss") {
+                                        ipc.clearTransfer()
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+                                }
+                            case .idle:
+                                EmptyView()
+                            }
+                            } // Group
                         }
                         .padding()
                         .background(.green.opacity(0.06))
@@ -284,6 +350,22 @@ struct ContentView: View {
         // Incoming pairing request sheet
         .sheet(item: $ipc.pendingRequest) { request in
             PairingRequestView(request: request, ipc: ipc)
+        }
+    }
+
+    func pickAndSendFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.title = "Select a file to send"
+        let ipcRef = ipc
+        let daemonRef = daemon
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            let path = url.path
+            ipcRef.transferPhase = .sending(fileName: url.lastPathComponent, transferId: "pending")
+            daemonRef.sendFile(path: path)
         }
     }
 
