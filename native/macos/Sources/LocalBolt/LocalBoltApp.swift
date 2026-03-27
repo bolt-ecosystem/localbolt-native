@@ -177,6 +177,89 @@ struct ContentView: View {
                     .background(.quaternary)
                     .cornerRadius(8)
 
+                    // Active session
+                    if ipc.sessionPhase == .connected, let peer = ipc.connectedPeer {
+                        VStack(spacing: 12) {
+                            HStack {
+                                Image(systemName: "link")
+                                    .foregroundColor(.green)
+                                Text("Connected to \(peer.deviceName)")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Spacer()
+                                Button("Disconnect") {
+                                    ipc.disconnectSession()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .tint(.red)
+                            }
+
+                            // Trust state
+                            HStack(spacing: 8) {
+                                switch peer.trust {
+                                case .verified:
+                                    Image(systemName: "checkmark.shield.fill")
+                                        .foregroundColor(.green)
+                                    Text("Verified")
+                                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                        .foregroundColor(.green)
+                                case .unverified(let sas):
+                                    Image(systemName: "exclamationmark.shield")
+                                        .foregroundColor(.yellow)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Unverified — confirm code matches:")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                        Text(sas)
+                                            .font(.system(size: 20, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.yellow)
+                                            .tracking(4)
+                                    }
+                                    Spacer()
+                                    Button("Verify") {
+                                        ipc.markVerified()
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                                    .tint(.green)
+                                case .legacy:
+                                    Image(systemName: "shield.slash")
+                                        .foregroundColor(.secondary)
+                                    Text("Legacy peer (no identity)")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(.green.opacity(0.06))
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(.green.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+
+                    // Session ended notice
+                    if case .disconnected(let reason) = ipc.sessionPhase {
+                        HStack(spacing: 8) {
+                            Image(systemName: "xmark.circle")
+                                .foregroundColor(.secondary)
+                            Text("Disconnected: \(reason)")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button("Dismiss") {
+                                ipc.resetSession()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                        }
+                        .padding(10)
+                        .background(.quaternary)
+                        .cornerRadius(6)
+                    }
+
                     // Daemon log (collapsed by default)
                     if daemon.isRunning && !daemon.recentStderr.isEmpty {
                         DisclosureGroup("Daemon Log") {

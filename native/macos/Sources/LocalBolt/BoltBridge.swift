@@ -259,11 +259,37 @@ struct PairingRequest: Identifiable {
     let sas: String
 }
 
+/// Session trust state.
+enum TrustState: Equatable {
+    case unverified(sas: String)
+    case verified
+    case legacy // peer lacks identity support
+}
+
+/// Connected peer session info.
+struct PeerSession {
+    let peerCode: String
+    let deviceName: String
+    let deviceType: String
+    var trust: TrustState
+}
+
+/// Session lifecycle phase.
+enum SessionPhase: Equatable {
+    case idle
+    case pairingPending
+    case connected
+    case disconnected(reason: String)
+}
+
 /// Manages IPC connection to the daemon for event forwarding and decisions.
 @Observable
 final class IpcManager {
     private(set) var isConnected = false
     var pendingRequest: PairingRequest?
+    private(set) var sessionPhase: SessionPhase = .idle
+    private(set) var connectedPeer: PeerSession?
+    private(set) var connectedPeerCount: UInt32 = 0
 
     private var handle: OpaquePointer?
     private var pollTimer: Timer?
@@ -302,6 +328,9 @@ final class IpcManager {
 
         isConnected = false
         pendingRequest = nil
+        sessionPhase = .idle
+        connectedPeer = nil
+        connectedPeerCount = 0
     }
 
     /// Send a pairing decision back to the daemon.
@@ -319,8 +348,47 @@ final class IpcManager {
             }
         }
 
-        // Clear the pending request after decision
+        if accept, let req = pendingRequest {
+            // Transition to connected. If SAS was present, start as unverified.
+            let trust: TrustState = req.sas.isEmpty ? .legacy : .unverified(sas: req.sas)
+            connectedPeer = PeerSession(
+                peerCode: req.requestId,
+                deviceName: req.deviceName,
+                deviceType: req.deviceType,
+                trust: trust
+            )
+            sessionPhase = .connected
+        }
+
         pendingRequest = nil
+    }
+
+    /// Mark the current session as verified (user confirmed SAS match).
+    func markVerified() {
+        connectedPeer?.trust = .verified
+    }
+
+    /// Reset session phase to idle (dismiss disconnected notice).
+    func resetSession() {
+        sessionPhase = .idle
+        connectedPeer = nil
+    }
+
+    /// Disconnect the current session.
+    func disconnectSession() {
+        guard let h = handle else { return }
+
+        let payload = """
+        {"reason":"user_initiated"}
+        """
+        payload.withCString { payloadCStr in
+            "session.disconnect".withCString { typeCStr in
+                let _ = bolt_ipc_send_decision(h, typeCStr, payloadCStr)
+            }
+        }
+
+        sessionPhase = .disconnected(reason: "user initiated")
+        connectedPeer = nil
     }
 
     private func poll() {
@@ -341,9 +409,10 @@ final class IpcManager {
         for line in raw.split(separator: "\n") {
             guard let data = line.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let event = json["event"] as? String,
-                  let payload = json["payload"] as? [String: Any]
+                  let event = json["event"] as? String
             else { continue }
+
+            let payload = json["payload"] as? [String: Any] ?? [:]
 
             switch event {
             case "daemon://pairing-request":
@@ -355,9 +424,51 @@ final class IpcManager {
                     sas: payload["sas"] as? String ?? ""
                 )
                 pendingRequest = req
+                sessionPhase = .pairingPending
+
+            case "daemon://status-update":
+                connectedPeerCount = UInt32(payload["connected_peers"] as? Int ?? 0)
+                // If daemon reports 0 peers and we think we're connected, session ended
+                if connectedPeerCount == 0 && sessionPhase == .connected {
+                    sessionPhase = .disconnected(reason: "peer disconnected")
+                    connectedPeer = nil
+                }
+
+            case "daemon://session-connected":
+                // Future: daemon emits when WebRTC session established
+                sessionPhase = .connected
+                // Update peer info if available in payload
+                if let peerCode = payload["remote_peer_id"] as? String {
+                    if connectedPeer == nil {
+                        connectedPeer = PeerSession(
+                            peerCode: peerCode,
+                            deviceName: "Peer",
+                            deviceType: "desktop",
+                            trust: .legacy
+                        )
+                    }
+                }
+
+            case "daemon://session-sas":
+                // Future: daemon emits SAS for verification
+                if let sas = payload["sas"] as? String {
+                    connectedPeer?.trust = .unverified(sas: sas)
+                }
+
+            case "daemon://session-ended":
+                let reason = payload["reason"] as? String ?? "unknown"
+                sessionPhase = .disconnected(reason: reason)
+                connectedPeer = nil
+
+            case "daemon://session-error":
+                let reason = payload["reason"] as? String ?? "unknown"
+                sessionPhase = .disconnected(reason: reason)
+                connectedPeer = nil
 
             case "daemon://bridge-disconnected":
                 isConnected = false
+                sessionPhase = .disconnected(reason: "bridge lost")
+                connectedPeer = nil
                 stop()
 
             default:
