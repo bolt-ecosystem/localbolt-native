@@ -300,8 +300,8 @@ enum SessionPhase: Equatable {
 /// Transfer lifecycle phase.
 enum TransferPhase: Equatable {
     case idle
-    case sending(fileName: String, transferId: String)
-    case receiving(fileName: String, transferId: String)
+    case sending(fileName: String, transferId: String, progress: Float)
+    case receiving(fileName: String, transferId: String, progress: Float)
     case complete(fileName: String, savePath: String?)
     case failed(fileName: String, reason: String)
 }
@@ -501,9 +501,22 @@ final class IpcManager {
                 let transferId = payload["transfer_id"] as? String ?? ""
                 let direction = payload["direction"] as? String ?? "send"
                 if direction == "receive" {
-                    transferPhase = .receiving(fileName: fileName, transferId: transferId)
+                    transferPhase = .receiving(fileName: fileName, transferId: transferId, progress: 0)
                 } else {
-                    transferPhase = .sending(fileName: fileName, transferId: transferId)
+                    transferPhase = .sending(fileName: fileName, transferId: transferId, progress: 0)
+                }
+
+            case "daemon://transfer-progress":
+                let progress = (payload["progress"] as? NSNumber)?.floatValue ?? 0
+                let transferId = payload["transfer_id"] as? String ?? ""
+                // Update progress on the current phase without changing the phase type
+                switch transferPhase {
+                case .sending(let fn, _, _):
+                    transferPhase = .sending(fileName: fn, transferId: transferId, progress: progress)
+                case .receiving(let fn, _, _):
+                    transferPhase = .receiving(fileName: fn, transferId: transferId, progress: progress)
+                default:
+                    break
                 }
 
             case "daemon://transfer-complete":

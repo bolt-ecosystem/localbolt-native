@@ -242,21 +242,37 @@ struct ContentView: View {
                             // Transfer status
                             Group {
                             switch ipc.transferPhase {
-                            case .sending(let fileName, _):
-                                HStack(spacing: 8) {
-                                    ProgressView()
-                                        .scaleEffect(0.6)
-                                    Text("Sending \(fileName)...")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
+                            case .sending(let fileName, _, let progress):
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "arrow.up.circle")
+                                            .foregroundColor(.green)
+                                        Text("Sending \(fileName)")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                        Text("\(Int(progress * 100))%")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.green)
+                                    }
+                                    ProgressView(value: Double(progress))
+                                        .tint(.green)
                                 }
-                            case .receiving(let fileName, _):
-                                HStack(spacing: 8) {
-                                    ProgressView()
-                                        .scaleEffect(0.6)
-                                    Text("Receiving \(fileName)...")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
+                            case .receiving(let fileName, _, let progress):
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "arrow.down.circle")
+                                            .foregroundColor(.blue)
+                                        Text("Receiving \(fileName)")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                        Text("\(Int(progress * 100))%")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.blue)
+                                    }
+                                    ProgressView(value: Double(progress))
+                                        .tint(.blue)
                                 }
                             case .complete(let fileName, let savePath):
                                 HStack(spacing: 8) {
@@ -364,7 +380,7 @@ struct ContentView: View {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             let path = url.path
-            ipcRef.transferPhase = .sending(fileName: url.lastPathComponent, transferId: "pending")
+            ipcRef.transferPhase = .sending(fileName: url.lastPathComponent, transferId: "pending", progress: 0)
             daemonRef.sendFile(path: path)
         }
     }
