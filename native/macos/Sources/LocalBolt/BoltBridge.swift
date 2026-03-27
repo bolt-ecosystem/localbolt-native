@@ -320,7 +320,7 @@ final class IpcManager {
     private var pollTimer: Timer?
 
     /// Connect to daemon IPC socket.
-    func start(socketPath: String, appVersion: String = "0.1.0") {
+    func start(socketPath: String, appVersion: String = "0.0.1") {
         guard handle == nil else { return }
 
         handle = socketPath.withCString { pathCStr in

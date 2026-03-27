@@ -75,6 +75,12 @@ pub unsafe extern "C" fn bolt_daemon_start(
     let ws_listen = format!("0.0.0.0:{port}");
 
     let _ = std::fs::create_dir_all(&data_dir);
+    // Daemon requires data_dir to be mode 0700 (identity key protection)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700));
+    }
 
     let mut child = match Command::new(bin_path)
         .args(&[
