@@ -346,25 +346,37 @@ final class IpcManager {
     private var handle: OpaquePointer?
     private var pollTimer: Timer?
 
-    /// Connect to daemon IPC socket.
+    /// Connect to daemon IPC socket with retry.
+    /// Retries up to 5 times with 500ms delay to handle daemon startup race.
     func start(socketPath: String, appVersion: String = "0.0.1") {
         guard handle == nil else { return }
+        startWithRetry(socketPath: socketPath, appVersion: appVersion, attempt: 1)
+    }
 
-        handle = socketPath.withCString { pathCStr in
+    private func startWithRetry(socketPath: String, appVersion: String, attempt: Int) {
+        let maxAttempts = 5
+
+        let result = socketPath.withCString { pathCStr in
             appVersion.withCString { verCStr in
                 bolt_ipc_start(pathCStr, verCStr)
             }
         }
 
-        guard handle != nil else {
-            print("[IPC] start failed — daemon socket not available")
-            return
-        }
-
-        isConnected = true
-
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
-            self?.poll()
+        if let h = result {
+            handle = h
+            isConnected = true
+            print("[IPC] connected on attempt \(attempt)")
+            pollTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+                self?.poll()
+            }
+        } else if attempt < maxAttempts {
+            print("[IPC] attempt \(attempt)/\(maxAttempts) failed — retrying in 500ms")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.startWithRetry(socketPath: socketPath, appVersion: appVersion, attempt: attempt + 1)
+            }
+        } else {
+            print("[IPC] all \(maxAttempts) attempts failed — IPC unavailable")
+            isConnected = false
         }
     }
 

@@ -71,21 +71,11 @@ struct LocalBoltApp: App {
             case "connection_request":
                 let deviceName = signal.data["deviceName"] as? String ?? "Unknown Device"
                 let deviceType = signal.data["deviceType"] as? String ?? "desktop"
-                // Surface as an incoming connection request (reuse pairing request UI)
-                ipc.pendingRequest = PairingRequest(
-                    id: signal.from,
-                    requestId: signal.from,
-                    deviceName: deviceName,
-                    deviceType: deviceType,
-                    sas: "" // SAS comes later after session established
-                )
-                // Send connection_accepted back with our wsUrl so the browser can connect
-                let wsPort = daemon.wsPort
-                let wsUrl = "ws://\(localIPAddress()):\(wsPort)"
-                signaling.sendSignal(
-                    toPeerCode: signal.from,
-                    signalType: "connection_accepted",
-                    dataJson: "{\"wsUrl\":\"\(wsUrl)\"}"
+                // Surface inline in the transfer card
+                signaling.incomingConnectionRequest = IncomingSignal(
+                    from: signal.from,
+                    signalType: signal.signalType,
+                    data: ["deviceName": deviceName, "deviceType": deviceType]
                 )
             case "connection_accepted":
                 // Remote peer accepted our request — they may provide wsUrl for direct connect
@@ -212,11 +202,13 @@ struct ContentView: View {
 
             Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
 
-            // Card content: priority order matches web
-            // connected > incoming request (sheet) > connecting > device list > button
+            // Card content: priority order matches web exactly
+            // 1. connected > 2. incoming request > 3. connecting > 4. device list > 5. button
             if ipc.sessionPhase == .connected, let peer = ipc.connectedPeer {
                 sessionContent(peer: peer)
-                    .onAppear { cancelConnection() } // clear connecting state
+                    .onAppear { cancelConnection() }
+            } else if let req = signaling.incomingConnectionRequest {
+                incomingRequestContent(request: req)
             } else if let target = connectingTo {
                 connectingContent(target: target)
             } else {
@@ -416,6 +408,63 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
+    }
+
+    // MARK: - Incoming Request (inline, matches web)
+
+    private func incomingRequestContent(request: IncomingSignal) -> some View {
+        let deviceName = request.data["deviceName"] as? String ?? "Unknown Device"
+        let deviceType = request.data["deviceType"] as? String ?? "desktop"
+
+        return VStack(spacing: 12) {
+            // Device info
+            HStack(spacing: 10) {
+                Image(systemName: deviceIcon(deviceType))
+                    .font(.system(size: 20))
+                    .foregroundColor(neon.opacity(0.6))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(deviceName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.9))
+                    Text("wants to connect")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+                Spacer()
+            }
+
+            // Accept / Decline
+            HStack(spacing: 12) {
+                Button(action: {
+                    // Decline: clear request, send declined signal
+                    signaling.sendSignal(toPeerCode: request.from, signalType: "connection_declined")
+                    signaling.incomingConnectionRequest = nil
+                }) {
+                    Text("Decline")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.red.opacity(0.8))
+
+                Button(action: {
+                    // Accept: send connection_accepted with wsUrl, clear request
+                    let wsPort = daemon.wsPort
+                    let wsUrl = "ws://\(localIPAddress()):\(wsPort)"
+                    signaling.sendSignal(
+                        toPeerCode: request.from,
+                        signalType: "connection_accepted",
+                        dataJson: "{\"wsUrl\":\"\(wsUrl)\"}"
+                    )
+                    signaling.incomingConnectionRequest = nil
+                }) {
+                    Text("Accept")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(neon)
+            }
+        }
+        .padding(16)
     }
 
     // MARK: - Session
