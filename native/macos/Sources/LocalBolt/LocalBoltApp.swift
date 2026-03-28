@@ -6,6 +6,7 @@ struct LocalBoltApp: App {
     @State private var daemon = DaemonManager()
     @State private var signaling: SignalingManager
     @State private var ipc = IpcManager()
+    @State private var showDiagnostics = false
 
     init() {
         let code = BoltBridge.generatePeerCode()
@@ -14,360 +15,413 @@ struct LocalBoltApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(daemon: daemon, signaling: signaling, ipc: ipc)
+            ContentView(daemon: daemon, signaling: signaling, ipc: ipc, showDiagnostics: $showDiagnostics)
+                .onAppear { autoStart() }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 420, height: 600)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Diagnostics") { showDiagnostics.toggle() }
+                    .keyboardShortcut("d", modifiers: [.command, .option])
+            }
+        }
+    }
+
+    /// Auto-start daemon + signaling + IPC on app launch.
+    private func autoStart() {
+        guard daemon.daemonBinaryPath != nil, !daemon.isRunning else { return }
+        daemon.start()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            signaling.start(
+                localUrl: "ws://127.0.0.1:3001",
+                cloudUrl: "wss://bolt-rendezvous.fly.dev"
+            )
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            ipc.start(socketPath: daemon.socketPath)
+        }
     }
 }
+
+// MARK: - Main Content View
 
 struct ContentView: View {
     @Bindable var daemon: DaemonManager
     @Bindable var signaling: SignalingManager
     @Bindable var ipc: IpcManager
+    @Binding var showDiagnostics: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
+            // ── Header ──────────────────────────────────────
             HStack {
                 Image(systemName: "bolt.fill")
-                    .foregroundColor(.green)
+                    .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0))
                 Text("LocalBolt")
                     .font(.system(.headline, design: .monospaced))
                     .fontWeight(.bold)
                 Spacer()
                 Circle()
-                    .fill(signaling.isConnected ? Color.green : Color.red)
+                    .fill(signaling.isConnected ? Color(red: 0.64, green: 0.88, blue: 0) : Color.red)
                     .frame(width: 8, height: 8)
                 Text(signaling.isConnected ? "ONLINE" : "OFFLINE")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.secondary)
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .background(.ultraThinMaterial)
 
             Divider()
 
+            // ── Main transfer surface ────────────────────────
             ScrollView {
-                VStack(spacing: 20) {
-                    // Peer code
-                    VStack(spacing: 8) {
-                        Text("Your Peer Code")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(.secondary)
-                        Text(signaling.peerCode)
-                            .font(.system(size: 28, weight: .bold, design: .monospaced))
-                            .foregroundColor(.green)
-                            .tracking(4)
-                    }
-                    .padding(.top, 16)
+                VStack(spacing: 16) {
+                    Spacer().frame(height: 12)
 
-                    // Daemon controls
-                    HStack(spacing: 12) {
-                        Button(action: {
-                            if daemon.isRunning {
-                                ipc.stop()
-                                signaling.stop()
-                                daemon.stop()
-                            } else {
-                                daemon.start()
-                                // Start signaling + IPC once daemon is up
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                                    signaling.start(
-                                        localUrl: "ws://127.0.0.1:3001",
-                                        cloudUrl: "wss://bolt-rendezvous.fly.dev"
-                                    )
-                                }
-                                // Connect IPC after daemon socket is ready
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                    ipc.start(socketPath: daemon.socketPath)
-                                }
-                            }
-                        }) {
-                            Label(
-                                daemon.isRunning ? "Stop" : "Start",
-                                systemImage: daemon.isRunning ? "stop.fill" : "play.fill"
-                            )
-                        }
-                        .disabled(daemon.daemonBinaryPath == nil)
-                        .tint(daemon.isRunning ? .red : .green)
-                        .buttonStyle(.bordered)
+                    // Startup state
+                    if !daemon.isRunning {
+                        startupView
+                    } else {
+                        // Peer code
+                        peerCodeView
 
-                        if daemon.isRunning {
-                            HStack(spacing: 8) {
-                                Text("PID \(daemon.pid)")
-                                Text("WS :\(daemon.wsPort)")
-                                if ipc.isConnected {
-                                    Text("IPC")
-                                        .foregroundColor(.green)
-                                }
-                            }
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.secondary)
-                        }
+                        // Transfer card (matches web product layout)
+                        transferCard
                     }
 
-                    // Peer list
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Nearby Devices")
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text("\(signaling.peers.count)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.green)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(.green.opacity(0.15))
-                                .cornerRadius(4)
-                        }
-
-                        if signaling.peers.isEmpty {
-                            HStack {
-                                if signaling.isConnected {
-                                    ProgressView()
-                                        .scaleEffect(0.6)
-                                    Text("Searching for devices...")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                } else if !daemon.isRunning {
-                                    Image(systemName: "bolt.slash")
-                                        .foregroundColor(.secondary)
-                                    Text("Start daemon to discover devices")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                } else {
-                                    Image(systemName: "wifi.slash")
-                                        .foregroundColor(.secondary)
-                                    Text("Connecting to signaling...")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 8)
-                        } else {
-                            ForEach(signaling.peers) { peer in
-                                HStack {
-                                    Image(systemName: deviceIcon(peer.deviceType))
-                                        .foregroundColor(.green.opacity(0.7))
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(peer.deviceName)
-                                            .font(.system(size: 13))
-                                        Text(peer.peerCode)
-                                            .font(.system(size: 10, design: .monospaced))
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    Button("Connect") {
-                                        signaling.sendSignal(
-                                            toPeerCode: peer.peerCode,
-                                            signalType: "connect-request"
-                                        )
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                    .disabled(!ipc.isConnected)
-                                }
-                                .padding(.vertical, 4)
-                            }
-                        }
-                    }
-                    .padding()
-                    .background(.quaternary)
-                    .cornerRadius(8)
-
-                    // Active session
-                    if ipc.sessionPhase == .connected, let peer = ipc.connectedPeer {
-                        VStack(spacing: 12) {
-                            HStack {
-                                Image(systemName: "link")
-                                    .foregroundColor(.green)
-                                Text("Connected to \(peer.deviceName)")
-                                    .font(.system(size: 13, weight: .semibold))
-                                Spacer()
-                                Button("Send File") {
-                                    pickAndSendFile()
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                .tint(.green)
-                                .disabled(ipc.transferPhase != .idle)
-                                Button("Disconnect") {
-                                    ipc.disconnectSession()
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                .tint(.red)
-                            }
-
-                            // Trust state
-                            HStack(spacing: 8) {
-                                switch peer.trust {
-                                case .verified:
-                                    Image(systemName: "checkmark.shield.fill")
-                                        .foregroundColor(.green)
-                                    Text("Verified")
-                                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                        .foregroundColor(.green)
-                                case .unverified(let sas):
-                                    Image(systemName: "exclamationmark.shield")
-                                        .foregroundColor(.yellow)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Unverified — confirm code matches:")
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.secondary)
-                                        Text(sas)
-                                            .font(.system(size: 20, weight: .bold, design: .monospaced))
-                                            .foregroundColor(.yellow)
-                                            .tracking(4)
-                                    }
-                                    Spacer()
-                                    Button("Verify") {
-                                        ipc.markVerified()
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .controlSize(.small)
-                                    .tint(.green)
-                                case .legacy:
-                                    Image(systemName: "shield.slash")
-                                        .foregroundColor(.secondary)
-                                    Text("Legacy peer (no identity)")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-
-                            // Transfer status
-                            Group {
-                            switch ipc.transferPhase {
-                            case .sending(let fileName, _, let progress):
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "arrow.up.circle")
-                                            .foregroundColor(.green)
-                                        Text("Sending \(fileName)")
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.secondary)
-                                        Spacer()
-                                        Text("\(Int(progress * 100))%")
-                                            .font(.system(size: 11, design: .monospaced))
-                                            .foregroundColor(.green)
-                                    }
-                                    ProgressView(value: Double(progress))
-                                        .tint(.green)
-                                }
-                            case .receiving(let fileName, _, let progress):
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "arrow.down.circle")
-                                            .foregroundColor(.blue)
-                                        Text("Receiving \(fileName)")
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.secondary)
-                                        Spacer()
-                                        Text("\(Int(progress * 100))%")
-                                            .font(.system(size: 11, design: .monospaced))
-                                            .foregroundColor(.blue)
-                                    }
-                                    ProgressView(value: Double(progress))
-                                        .tint(.blue)
-                                }
-                            case .complete(let fileName, let savePath):
-                                HStack(spacing: 8) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundColor(.green)
-                                    Text("\(fileName) complete")
-                                        .font(.system(size: 11))
-                                    Spacer()
-                                    if let path = savePath {
-                                        Button("Reveal") {
-                                            NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.mini)
-                                    }
-                                    Button("Dismiss") {
-                                        ipc.clearTransfer()
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.mini)
-                                }
-                            case .failed(let fileName, let reason):
-                                HStack(spacing: 8) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.red)
-                                    Text("\(fileName) failed: \(reason)")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                    Button("Dismiss") {
-                                        ipc.clearTransfer()
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.mini)
-                                }
-                            case .idle:
-                                EmptyView()
-                            }
-                            } // Group
-                        }
-                        .padding()
-                        .background(.green.opacity(0.06))
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(.green.opacity(0.2), lineWidth: 1)
-                        )
-                    }
-
-                    // Session ended notice
-                    if case .disconnected(let reason) = ipc.sessionPhase {
-                        HStack(spacing: 8) {
-                            Image(systemName: "xmark.circle")
-                                .foregroundColor(.secondary)
-                            Text("Disconnected: \(reason)")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Button("Dismiss") {
-                                ipc.resetSession()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.mini)
-                        }
-                        .padding(10)
-                        .background(.quaternary)
-                        .cornerRadius(6)
-                    }
-
-                    // Daemon log (collapsed by default)
-                    if daemon.isRunning && !daemon.recentStderr.isEmpty {
-                        DisclosureGroup("Daemon Log") {
-                            Text(daemon.recentStderr)
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(.green.opacity(0.6))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .textSelection(.enabled)
-                        }
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .padding(8)
-                        .background(Color.black.opacity(0.2))
-                        .cornerRadius(6)
-                    }
+                    Spacer()
                 }
-                .padding()
+                .padding(.horizontal, 16)
             }
         }
         .frame(minWidth: 380, minHeight: 500)
         .background(Color(nsColor: .windowBackgroundColor))
-        // Incoming pairing request sheet
         .sheet(item: $ipc.pendingRequest) { request in
             PairingRequestView(request: request, ipc: ipc)
         }
+        .sheet(isPresented: $showDiagnostics) {
+            DiagnosticsView(daemon: daemon, ipc: ipc, signaling: signaling)
+        }
     }
+
+    // MARK: - Startup
+
+    private var startupView: some View {
+        VStack(spacing: 16) {
+            Spacer().frame(height: 40)
+            if daemon.daemonBinaryPath == nil {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 32))
+                    .foregroundColor(.yellow)
+                Text("Daemon not found")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("bolt-daemon binary is missing from the app bundle.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            } else {
+                ProgressView()
+                    .scaleEffect(0.8)
+                Text("Starting...")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Peer Code
+
+    private var peerCodeView: some View {
+        VStack(spacing: 6) {
+            Text(signaling.peerCode)
+                .font(.system(size: 32, weight: .bold, design: .monospaced))
+                .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0))
+                .tracking(4)
+            Text("Your Peer Code")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+        }
+    }
+
+    // MARK: - Transfer Card
+
+    private var transferCard: some View {
+        VStack(spacing: 0) {
+            // Encryption badge
+            HStack(spacing: 6) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0).opacity(0.7))
+                Text("End-to-End Encrypted")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0).opacity(0.7))
+            }
+            .padding(.vertical, 10)
+
+            Divider().opacity(0.3)
+
+            // Active session or peer discovery
+            if ipc.sessionPhase == .connected, let peer = ipc.connectedPeer {
+                sessionView(peer: peer)
+            } else {
+                peerDiscoveryView
+            }
+
+            // Session ended
+            if case .disconnected(let reason) = ipc.sessionPhase {
+                Divider().opacity(0.3)
+                HStack(spacing: 6) {
+                    Text("Disconnected: \(reason)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button("Dismiss") { ipc.resetSession() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+        }
+        .background(Color.black.opacity(0.15))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color(red: 0.64, green: 0.88, blue: 0).opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Peer Discovery
+
+    private var peerDiscoveryView: some View {
+        VStack(spacing: 0) {
+            if signaling.peers.isEmpty {
+                VStack(spacing: 8) {
+                    if signaling.isConnected {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                        Text("Searching for devices...")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    } else {
+                        Image(systemName: "wifi.slash")
+                            .foregroundColor(.secondary)
+                        Text("Connecting...")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            } else {
+                ForEach(signaling.peers) { peer in
+                    if peer.id != signaling.peers.first?.id {
+                        Divider().opacity(0.2)
+                    }
+                    peerRow(peer)
+                }
+            }
+        }
+    }
+
+    private func peerRow(_ peer: DiscoveredPeer) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: deviceIcon(peer.deviceType))
+                .font(.system(size: 16))
+                .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0).opacity(0.6))
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(peer.deviceName)
+                    .font(.system(size: 13))
+                Text(peer.peerCode)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Button("Connect") {
+                signaling.sendSignal(toPeerCode: peer.peerCode, signalType: "connect-request")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(Color(red: 0.64, green: 0.88, blue: 0))
+            .disabled(!ipc.isConnected)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Active Session
+
+    private func sessionView(peer: PeerSession) -> some View {
+        VStack(spacing: 0) {
+            // Connected peer header
+            HStack {
+                Image(systemName: "link")
+                    .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0))
+                Text(peer.deviceName)
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Button("Disconnect") { ipc.disconnectSession() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red.opacity(0.8))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+
+            Divider().opacity(0.2)
+
+            // Trust state
+            trustView(peer: peer)
+
+            // Transfer UI (only when transfer is allowed)
+            if peer.trust == .verified || peer.trust == .legacy {
+                Divider().opacity(0.2)
+                transferActionView
+            }
+        }
+    }
+
+    private func trustView(peer: PeerSession) -> some View {
+        HStack(spacing: 8) {
+            switch peer.trust {
+            case .verified:
+                Image(systemName: "checkmark.shield.fill")
+                    .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0))
+                Text("Verified")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0))
+            case .unverified(let sas):
+                Image(systemName: "exclamationmark.shield")
+                    .foregroundColor(.yellow)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Verify this code matches:")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Text(sas)
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .foregroundColor(.yellow)
+                        .tracking(4)
+                }
+                Spacer()
+                Button("Verify") { ipc.markVerified() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(Color(red: 0.64, green: 0.88, blue: 0))
+            case .legacy:
+                Image(systemName: "shield.slash")
+                    .foregroundColor(.secondary)
+                Text("Legacy Peer")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Transfer Action
+
+    private var transferActionView: some View {
+        Group {
+            switch ipc.transferPhase {
+            case .idle:
+                Button(action: { pickAndSendFile() }) {
+                    HStack {
+                        Image(systemName: "square.and.arrow.up")
+                        Text("Send File")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.64, green: 0.88, blue: 0))
+                .controlSize(.large)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+
+            case .sending(let fileName, _, let progress):
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Image(systemName: "arrow.up.circle")
+                            .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0))
+                        Text("Sending \(fileName)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(Int(progress * 100))%")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0))
+                    }
+                    ProgressView(value: Double(progress))
+                        .tint(Color(red: 0.64, green: 0.88, blue: 0))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+
+            case .receiving(let fileName, _, let progress):
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Image(systemName: "arrow.down.circle")
+                            .foregroundColor(.blue)
+                        Text("Receiving \(fileName)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(Int(progress * 100))%")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.blue)
+                    }
+                    ProgressView(value: Double(progress))
+                        .tint(.blue)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+
+            case .complete(let fileName, let savePath):
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0))
+                    Text("\(fileName)")
+                        .font(.system(size: 11))
+                    Spacer()
+                    if let path = savePath {
+                        Button("Reveal") {
+                            NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                    }
+                    Button("Done") { ipc.clearTransfer() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+
+            case .failed(let fileName, let reason):
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.red)
+                    Text("\(fileName): \(reason)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button("Dismiss") { ipc.clearTransfer() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+            }
+        }
+    }
+
+    // MARK: - Helpers
 
     func pickAndSendFile() {
         let panel = NSOpenPanel()
@@ -379,9 +433,8 @@ struct ContentView: View {
         let daemonRef = daemon
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
-            let path = url.path
             ipcRef.transferPhase = .sending(fileName: url.lastPathComponent, transferId: "pending", progress: 0)
-            daemonRef.sendFile(path: path)
+            daemonRef.sendFile(path: url.path)
         }
     }
 
@@ -396,18 +449,18 @@ struct ContentView: View {
     }
 }
 
-/// Sheet shown when a remote peer requests to connect.
+// MARK: - Pairing Request Sheet
+
 struct PairingRequestView: View {
     let request: PairingRequest
     let ipc: IpcManager
-
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "person.crop.circle.badge.questionmark")
                 .font(.system(size: 40))
-                .foregroundColor(.green)
+                .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0))
 
             Text("Connection Request")
                 .font(.system(.title2, design: .monospaced))
@@ -428,11 +481,11 @@ struct PairingRequestView: View {
                         .foregroundColor(.secondary)
                     Text(request.sas)
                         .font(.system(size: 24, weight: .bold, design: .monospaced))
-                        .foregroundColor(.green)
+                        .foregroundColor(Color(red: 0.64, green: 0.88, blue: 0))
                         .tracking(4)
                 }
                 .padding()
-                .background(.green.opacity(0.08))
+                .background(Color(red: 0.64, green: 0.88, blue: 0).opacity(0.08))
                 .cornerRadius(8)
 
                 Text("Confirm this code matches on the other device")
@@ -454,10 +507,83 @@ struct PairingRequestView: View {
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.green)
+                .tint(Color(red: 0.64, green: 0.88, blue: 0))
             }
         }
         .padding(30)
         .frame(width: 320)
+    }
+}
+
+// MARK: - Diagnostics Sheet (Cmd+Option+D)
+
+struct DiagnosticsView: View {
+    let daemon: DaemonManager
+    let ipc: IpcManager
+    let signaling: SignalingManager
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Diagnostics")
+                    .font(.system(.title3, design: .monospaced))
+                    .fontWeight(.bold)
+                Spacer()
+                Button("Close") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+
+            Divider()
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                GridRow {
+                    Text("Daemon").foregroundColor(.secondary)
+                    Text(daemon.isRunning ? "Running (PID \(daemon.pid))" : "Stopped")
+                }
+                GridRow {
+                    Text("WS Port").foregroundColor(.secondary)
+                    Text(daemon.isRunning ? ":\(daemon.wsPort)" : "-")
+                }
+                GridRow {
+                    Text("IPC").foregroundColor(.secondary)
+                    Text(ipc.isConnected ? "Connected" : "Disconnected")
+                        .foregroundColor(ipc.isConnected ? .green : .red)
+                }
+                GridRow {
+                    Text("Signaling").foregroundColor(.secondary)
+                    Text(signaling.isConnected ? "Connected" : "Disconnected")
+                        .foregroundColor(signaling.isConnected ? .green : .red)
+                }
+                GridRow {
+                    Text("Peers").foregroundColor(.secondary)
+                    Text("\(signaling.peers.count)")
+                }
+                GridRow {
+                    Text("Session").foregroundColor(.secondary)
+                    Text("\(String(describing: ipc.sessionPhase))")
+                }
+            }
+            .font(.system(size: 12, design: .monospaced))
+
+            if daemon.isRunning && !daemon.recentStderr.isEmpty {
+                Divider()
+                Text("Daemon Log")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.secondary)
+                ScrollView {
+                    Text(daemon.recentStderr)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.green.opacity(0.7))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 200)
+                .background(Color.black.opacity(0.3))
+                .cornerRadius(4)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 500, minHeight: 300)
     }
 }
