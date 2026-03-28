@@ -7,6 +7,13 @@ private let neon = Color(red: 0.64, green: 0.88, blue: 0)
 private let darkBg = Color(red: 0.08, green: 0.08, blue: 0.08)
 private let darkAccent = Color(red: 0.12, green: 0.12, blue: 0.12)
 
+/// Connection request phases (matches web: requesting → establishing → slow)
+enum ConnectingPhase {
+    case requesting   // "Waiting for [device] to accept..."
+    case establishing // "Establishing secure connection..."
+    case slow         // "Still connecting... taking longer than usual"
+}
+
 @main
 struct LocalBoltApp: App {
     @State private var daemon = DaemonManager()
@@ -55,6 +62,9 @@ struct ContentView: View {
     @Binding var showDiagnostics: Bool
     @State private var showDeviceList = false
     @State private var isDragOver = false
+    @State private var connectingTo: DiscoveredPeer? = nil
+    @State private var connectingPhase: ConnectingPhase = .requesting
+    @State private var connectingTimer: Timer? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -142,9 +152,13 @@ struct ContentView: View {
 
             Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
 
-            // Card content: devices OR session
+            // Card content: priority order matches web
+            // connected > incoming request (sheet) > connecting > device list > button
             if ipc.sessionPhase == .connected, let peer = ipc.connectedPeer {
                 sessionContent(peer: peer)
+                    .onAppear { cancelConnection() } // clear connecting state
+            } else if let target = connectingTo {
+                connectingContent(target: target)
             } else {
                 discoveryContent
             }
@@ -257,8 +271,7 @@ struct ContentView: View {
 
     private func peerRow(_ peer: DiscoveredPeer) -> some View {
         Button(action: {
-            signaling.sendSignal(toPeerCode: peer.peerCode, signalType: "connect-request")
-            withAnimation { showDeviceList = false }
+            initiateConnection(to: peer)
         }) {
             HStack(spacing: 10) {
                 Image(systemName: deviceIcon(peer.deviceType))
@@ -282,6 +295,67 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .background(.white.opacity(0.001)) // hit target
         .disabled(!ipc.isConnected)
+    }
+
+    // MARK: - Connecting (matches web: awaiting approval)
+
+    private func connectingContent(target: DiscoveredPeer) -> some View {
+        VStack(spacing: 12) {
+            // Pulsing indicator (matches web: nested circles)
+            ZStack {
+                Circle()
+                    .fill(neon.opacity(0.05))
+                    .frame(width: 40, height: 40)
+                    .scaleEffect(connectingPhase == .slow ? 1.2 : 1.0)
+                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: connectingPhase)
+                Circle()
+                    .fill(neon.opacity(0.1))
+                    .frame(width: 24, height: 24)
+                Circle()
+                    .fill(neon.opacity(0.4))
+                    .frame(width: 12, height: 12)
+            }
+            .padding(.top, 8)
+
+            // Status text (matches web phases)
+            VStack(spacing: 4) {
+                switch connectingPhase {
+                case .requesting:
+                    Text("Waiting for **\(target.deviceName)** to accept...")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.8))
+                    Text("The other device will be asked to confirm")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.3))
+                case .establishing:
+                    Text("Establishing secure connection with **\(target.deviceName)**...")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.8))
+                    Text("Setting up encrypted channel")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.3))
+                case .slow:
+                    Text("Still connecting to **\(target.deviceName)**...")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.8))
+                    Text("This is taking longer than usual")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.3))
+                }
+            }
+            .multilineTextAlignment(.center)
+
+            // Cancel button (matches web: subtle text button)
+            Button("Cancel") {
+                cancelConnection()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 12))
+            .foregroundColor(.white.opacity(0.3))
+            .padding(.bottom, 8)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Session
@@ -450,6 +524,39 @@ struct ContentView: View {
                 .tint(color)
         }
         .padding(16)
+    }
+
+    // MARK: - Connection Management
+
+    func initiateConnection(to peer: DiscoveredPeer) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            connectingTo = peer
+            connectingPhase = .requesting
+            showDeviceList = false
+        }
+        signaling.sendSignal(toPeerCode: peer.peerCode, signalType: "connect-request")
+
+        // Phase transitions: requesting (0s) → establishing (3s) → slow (8s)
+        connectingTimer?.invalidate()
+        connectingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [self] _ in
+            if connectingTo != nil && ipc.sessionPhase != .connected {
+                withAnimation { connectingPhase = .establishing }
+                connectingTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { _ in
+                    if connectingTo != nil && ipc.sessionPhase != .connected {
+                        withAnimation { connectingPhase = .slow }
+                    }
+                }
+            }
+        }
+    }
+
+    func cancelConnection() {
+        connectingTimer?.invalidate()
+        connectingTimer = nil
+        withAnimation(.easeInOut(duration: 0.15)) {
+            connectingTo = nil
+            connectingPhase = .requesting
+        }
     }
 
     // MARK: - Helpers
