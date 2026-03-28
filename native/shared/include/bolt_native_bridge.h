@@ -105,6 +105,10 @@ int bolt_signaling_is_connected(BoltSignaling* handle);
 /// Drain pending events (returns count). Read peer list after draining.
 uint32_t bolt_signaling_drain_events(BoltSignaling* handle);
 
+/// Drain incoming signals as newline-separated JSON.
+/// Returns null if no signals. Caller must free with bolt_free_string.
+char* bolt_signaling_drain_signals(BoltSignaling* handle);
+
 /// Send a signal to a peer (connection initiation).
 /// data_json may be null for empty payload.
 /// Returns 1 on success, 0 on failure.

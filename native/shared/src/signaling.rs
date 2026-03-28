@@ -40,6 +40,9 @@ pub struct BoltSignaling {
     peer_code: String,
     events: Arc<Mutex<Vec<SignalingEventInternal>>>,
     peers: Arc<Mutex<Vec<PeerInfo>>>,
+    connected: Arc<std::sync::atomic::AtomicBool>,
+    /// Incoming signals queued for the shell to read (JSON strings).
+    incoming_signals: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Clone)]
@@ -72,8 +75,12 @@ pub unsafe extern "C" fn bolt_signaling_start(
 
     let events: Arc<Mutex<Vec<SignalingEventInternal>>> = Arc::new(Mutex::new(Vec::new()));
     let peers: Arc<Mutex<Vec<PeerInfo>>> = Arc::new(Mutex::new(Vec::new()));
+    let connected: Arc<std::sync::atomic::AtomicBool> = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let incoming_signals: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let events_cb = Arc::clone(&events);
     let peers_cb = Arc::clone(&peers);
+    let connected_cb = Arc::clone(&connected);
+    let signals_cb = Arc::clone(&incoming_signals);
     let code_clone = code.clone();
 
     let config = SignalingConfig {
@@ -118,17 +125,27 @@ pub unsafe extern "C" fn bolt_signaling_start(
                     );
                 }
                 DiscoveryEvent::Connected(plane) => {
+                    connected_cb.store(true, std::sync::atomic::Ordering::Relaxed);
                     events_cb.lock().unwrap().push(
                         SignalingEventInternal::Connected(*plane)
                     );
                 }
                 DiscoveryEvent::Disconnected(reason, plane) => {
+                    // Only mark disconnected if both planes are down
+                    // (one plane disconnecting shouldn't mark offline)
                     events_cb.lock().unwrap().push(
                         SignalingEventInternal::Disconnected(reason.clone(), *plane)
                     );
                 }
-                DiscoveryEvent::Signal(_sig, _plane) => {
-                    // Signals handled in future slice (connect flow)
+                DiscoveryEvent::Signal(sig, _plane) => {
+                    // Queue incoming signals as JSON for the shell to process
+                    if let Ok(json) = serde_json::to_string(&serde_json::json!({
+                        "from": sig.from,
+                        "signal_type": sig.signal_type,
+                        "data": sig.data,
+                    })) {
+                        signals_cb.lock().unwrap().push(json);
+                    }
                 }
                 DiscoveryEvent::Error(msg) => {
                     eprintln!("[NATIVE_SIGNALING] error: {msg}");
@@ -142,6 +159,8 @@ pub unsafe extern "C" fn bolt_signaling_start(
         peer_code: code,
         events,
         peers,
+        connected,
+        incoming_signals,
     }))
 }
 
@@ -199,17 +218,7 @@ pub unsafe extern "C" fn bolt_peer_free(peer: *mut BoltPeer) {
 #[no_mangle]
 pub unsafe extern "C" fn bolt_signaling_is_connected(handle: *mut BoltSignaling) -> i32 {
     if handle.is_null() { return 0; }
-    // Check if we have any Connected events and no unmatched Disconnected
-    let events = (*handle).events.lock().unwrap();
-    let mut connected = false;
-    for e in events.iter() {
-        match e {
-            SignalingEventInternal::Connected(_) => connected = true,
-            SignalingEventInternal::Disconnected(_, _) => {} // one plane may disconnect
-            _ => {}
-        }
-    }
-    if connected { 1 } else { 0 }
+    if (*handle).connected.load(std::sync::atomic::Ordering::Relaxed) { 1 } else { 0 }
 }
 
 /// Drain pending events and return count. Use bolt_signaling_peer_count and
@@ -224,6 +233,22 @@ pub unsafe extern "C" fn bolt_signaling_drain_events(handle: *mut BoltSignaling)
     let count = events.len() as u32;
     events.clear();
     count
+}
+
+/// Drain incoming signals as newline-separated JSON.
+/// Each line: {"from":"...", "signal_type":"...", "data":{...}}
+/// Returns null if no signals. Caller must free with bolt_free_string.
+///
+/// # Safety
+/// `handle` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_signaling_drain_signals(handle: *mut BoltSignaling) -> *mut c_char {
+    if handle.is_null() { return std::ptr::null_mut(); }
+    let mut sigs = (*handle).incoming_signals.lock().unwrap();
+    if sigs.is_empty() { return std::ptr::null_mut(); }
+    let joined = sigs.join("\n");
+    sigs.clear();
+    CString::new(joined).map(|cs| cs.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
 /// Send a signal to a peer (connection initiation).

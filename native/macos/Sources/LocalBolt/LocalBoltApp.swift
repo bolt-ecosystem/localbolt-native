@@ -7,6 +7,26 @@ private let neon = Color(red: 0.64, green: 0.88, blue: 0)
 private let darkBg = Color(red: 0.08, green: 0.08, blue: 0.08)
 private let darkAccent = Color(red: 0.12, green: 0.12, blue: 0.12)
 
+/// Get the local LAN IP address for wsUrl in signaling payloads.
+private func localIPAddress() -> String {
+    var address = "127.0.0.1"
+    var ifaddr: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return address }
+    defer { freeifaddrs(ifaddr) }
+    for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
+        let sa = ptr.pointee.ifa_addr.pointee
+        guard sa.sa_family == UInt8(AF_INET) else { continue }
+        let name = String(cString: ptr.pointee.ifa_name)
+        guard name == "en0" || name == "en1" else { continue }
+        var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        getnameinfo(ptr.pointee.ifa_addr, socklen_t(sa.sa_len),
+                    &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
+        address = String(cString: hostname)
+        break
+    }
+    return address
+}
+
 /// Connection request phases (matches web: requesting → establishing → slow)
 enum ConnectingPhase {
     case requesting   // "Waiting for [device] to accept..."
@@ -29,7 +49,10 @@ struct LocalBoltApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(daemon: daemon, signaling: signaling, ipc: ipc, showDiagnostics: $showDiagnostics)
-                .onAppear { autoStart() }
+                .onAppear {
+                    autoStart()
+                    wireSignalingHandler()
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 420, height: 600)
@@ -37,6 +60,43 @@ struct LocalBoltApp: App {
             CommandGroup(after: .appInfo) {
                 Button("Diagnostics") { showDiagnostics.toggle() }
                     .keyboardShortcut("d", modifiers: [.command, .option])
+            }
+        }
+    }
+
+    /// Wire incoming signal handler so connection_request signals surface as pairing requests.
+    private func wireSignalingHandler() {
+        signaling.onIncomingSignal = { [self] signal in
+            switch signal.signalType {
+            case "connection_request":
+                let deviceName = signal.data["deviceName"] as? String ?? "Unknown Device"
+                let deviceType = signal.data["deviceType"] as? String ?? "desktop"
+                // Surface as an incoming connection request (reuse pairing request UI)
+                ipc.pendingRequest = PairingRequest(
+                    id: signal.from,
+                    requestId: signal.from,
+                    deviceName: deviceName,
+                    deviceType: deviceType,
+                    sas: "" // SAS comes later after session established
+                )
+                // Send connection_accepted back with our wsUrl so the browser can connect
+                let wsPort = daemon.wsPort
+                let wsUrl = "ws://\(localIPAddress()):\(wsPort)"
+                signaling.sendSignal(
+                    toPeerCode: signal.from,
+                    signalType: "connection_accepted",
+                    dataJson: "{\"wsUrl\":\"\(wsUrl)\"}"
+                )
+            case "connection_accepted":
+                // Remote peer accepted our request — they may provide wsUrl for direct connect
+                // (browser→native: browser accepted, provides nothing — session via WebRTC)
+                // (native→browser: browser accepted, we already have WS)
+                break
+            case "connection_declined":
+                // Remote peer declined — clear connecting state
+                break
+            default:
+                break
             }
         }
     }
@@ -534,7 +594,12 @@ struct ContentView: View {
             connectingPhase = .requesting
             showDeviceList = false
         }
-        signaling.sendSignal(toPeerCode: peer.peerCode, signalType: "connect-request")
+        // Send connection_request with wsUrl (matches web protocol)
+        let wsPort = daemon.wsPort
+        let wsUrl = "ws://\(localIPAddress()):\(wsPort)"
+        let deviceName = Host.current().localizedName ?? "Mac"
+        let payload = "{\"deviceName\":\"\(deviceName)\",\"deviceType\":\"desktop\",\"wsUrl\":\"\(wsUrl)\"}"
+        signaling.sendSignal(toPeerCode: peer.peerCode, signalType: "connection_request", dataJson: payload)
 
         // Phase transitions: requesting (0s) → establishing (3s) → slow (8s)
         connectingTimer?.invalidate()

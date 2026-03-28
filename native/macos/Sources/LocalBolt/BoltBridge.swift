@@ -162,15 +162,26 @@ struct DiscoveredPeer: Identifiable {
     let deviceType: String
 }
 
+/// An incoming signaling signal from a remote peer.
+struct IncomingSignal {
+    let from: String
+    let signalType: String
+    let data: [String: Any]
+}
+
 /// Manages signaling client and peer discovery via FFI.
 @Observable
 final class SignalingManager {
     private(set) var isConnected = false
     private(set) var peers: [DiscoveredPeer] = []
     private(set) var peerCode: String
+    /// Incoming connection request from a remote peer (set by poll, consumed by UI).
+    var incomingConnectionRequest: IncomingSignal? = nil
 
     private var handle: OpaquePointer?
     private var pollTimer: Timer?
+    /// Callback for incoming signals that need UI handling.
+    var onIncomingSignal: ((IncomingSignal) -> Void)? = nil
 
     init(peerCode: String) {
         self.peerCode = peerCode
@@ -235,8 +246,24 @@ final class SignalingManager {
 
         isConnected = bolt_signaling_is_connected(h) == 1
 
-        // Drain events to keep the queue clean
+        // Drain discovery events to keep the queue clean
         let _ = bolt_signaling_drain_events(h)
+
+        // Drain incoming signals (connection_request, connection_accepted, etc.)
+        if let sigPtr = bolt_signaling_drain_signals(h) {
+            let raw = String(cString: sigPtr)
+            bolt_free_string(sigPtr)
+            for line in raw.split(separator: "\n") {
+                guard let data = line.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let from = json["from"] as? String,
+                      let sigType = json["signal_type"] as? String
+                else { continue }
+                let sigData = json["data"] as? [String: Any] ?? [:]
+                let signal = IncomingSignal(from: from, signalType: sigType, data: sigData)
+                onIncomingSignal?(signal)
+            }
+        }
 
         // Read current peer list
         let count = bolt_signaling_peer_count(h)
