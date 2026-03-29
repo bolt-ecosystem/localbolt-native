@@ -57,6 +57,7 @@
 - **Build:** Passing (vite)
 - **Tests:** 156 pass (74 web + 82 Rust)
 - **BTR:** Enabled (`btrEnabled: true`) — CBTR-3 rollout, burn-in active
-- **src-tauri:** **Retired.** Tauri desktop path replaced by bolt-ui (current) and native SwiftUI shell (future).
-- **native/shared:** Rust C-ABI FFI bridge to bolt-app-core. Produces libbolt_native_bridge.a.
-- **native/macos:** SwiftUI shell scaffold. Daemon lifecycle + signaling/peer discovery via FFI.
+- **src-tauri:** **Retired.** Tauri desktop path superseded by native SwiftUI shell.
+- **native/shared:** Rust C-ABI FFI bridge (25 functions) to bolt-app-core. Produces libbolt_native_bridge.a (static).
+- **native/macos:** macOS SwiftUI shell — forward native product path. Full transfer vertical: discovery, connect, pair, verify, send/receive with progress, .app bundle with daemon sidecar. NATIVE-SHELL-1 and NATIVE-SHELL-UX-1 CLOSED.
+- **bolt-ui (egui):** Historical desktop shell in bolt-core-sdk. Superseded by native shells for forward development.
