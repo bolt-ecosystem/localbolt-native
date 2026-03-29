@@ -471,74 +471,91 @@ struct ContentView: View {
 
     private func sessionContent(peer: PeerSession) -> some View {
         VStack(spacing: 0) {
-            // Trust state (inline, matches web verification flow)
-            trustRow(peer: peer)
+            // Connected device header — prominent
+            HStack(spacing: 10) {
+                Image(systemName: "link.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(neon)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(peer.deviceName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.9))
+                    trustLabel(peer: peer)
+                }
+                Spacer()
+                Button(action: { ipc.disconnectSession() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.3))
+                }
+                .buttonStyle(.plain)
+                .help("Disconnect")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            // SAS verification prompt (only when unverified — blocks transfer)
+            if case .unverified(let sas) = peer.trust {
+                Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                VStack(spacing: 10) {
+                    Text("Verify this code matches on the other device:")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.4))
+                    Text(sas)
+                        .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        .foregroundColor(.yellow)
+                        .tracking(4)
+                    Button(action: { ipc.markVerified() }) {
+                        Text("Confirm Match")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(neon)
+                    .controlSize(.regular)
+                }
+                .padding(16)
+            }
 
             // Transfer area (gated by trust — matches web policy)
             if peer.trust == .verified || peer.trust == .legacy {
                 Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
                 transferArea
             }
-
-            // Disconnect
-            Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "link")
-                        .font(.system(size: 11))
-                        .foregroundColor(neon.opacity(0.5))
-                    Text(peer.deviceName)
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.4))
-                }
-                Spacer()
-                Button("Disconnect") { ipc.disconnectSession() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11))
-                    .foregroundColor(.red.opacity(0.6))
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
         }
     }
 
-    private func trustRow(peer: PeerSession) -> some View {
-        HStack(spacing: 8) {
-            switch peer.trust {
-            case .verified:
+    /// Compact trust label shown beside device name in the connected header.
+    @ViewBuilder
+    private func trustLabel(peer: PeerSession) -> some View {
+        switch peer.trust {
+        case .verified:
+            HStack(spacing: 4) {
                 Image(systemName: "checkmark.shield.fill")
-                    .foregroundColor(neon)
+                    .font(.system(size: 10))
+                    .foregroundColor(neon.opacity(0.7))
                 Text("Verified")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundColor(neon)
-            case .unverified(let sas):
-                Image(systemName: "exclamationmark.shield")
-                    .foregroundColor(.yellow)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Verify this code matches:")
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.4))
-                    Text(sas)
-                        .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundColor(.yellow)
-                        .tracking(3)
-                }
-                Spacer()
-                Button("Verify") { ipc.markVerified() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .tint(neon)
-            case .legacy:
-                Image(systemName: "shield.slash")
-                    .foregroundColor(.white.opacity(0.3))
-                Text("Legacy Peer")
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.3))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(neon.opacity(0.7))
             }
-            Spacer()
+        case .unverified:
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.shield")
+                    .font(.system(size: 10))
+                    .foregroundColor(.yellow.opacity(0.7))
+                Text("Unverified")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.yellow.opacity(0.7))
+            }
+        case .legacy:
+            HStack(spacing: 4) {
+                Image(systemName: "shield.slash")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.25))
+                Text("Legacy")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.25))
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
     }
 
     // MARK: - Transfer Area (matches web: drop zone + progress)
