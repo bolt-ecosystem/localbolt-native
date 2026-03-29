@@ -4,7 +4,9 @@ Native desktop app for [LocalBolt](https://localbolt.app). Encrypted peer-to-pee
 
 ## Current State
 
-The Tauri v2 implementation is **frozen** — the last published release (v1.2.24) was built with Tauri. The architecture has moved to a native shell direction (SwiftUI on macOS, platform-native on other OSes) consuming a shared Rust core (`bolt-app-core`) via FFI. The current production desktop shell is `bolt-ui` (egui) in `bolt-core-sdk`.
+The forward native product path uses **SwiftUI on macOS** consuming `bolt-app-core` (Rust) via C-ABI FFI with a bundled daemon sidecar. Full transfer vertical: discovery, connection, pairing, verification, send/receive with progress, and `.app` bundle packaging.
+
+The Tauri v2 implementation is frozen — the last published Tauri release was v1.2.24.
 
 See `docs/STATE.md` for detailed current state.
 
