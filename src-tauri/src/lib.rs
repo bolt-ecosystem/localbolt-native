@@ -1,13 +1,13 @@
+// Tauri-specific modules (shell-level, NOT shared)
 mod commands;
 mod daemon;
-mod daemon_log;
-mod ipc_bridge;
-mod ipc_client;
-mod ipc_transport;
-mod ipc_types;
-mod platform;
-mod signal_monitor;
-mod watchdog;
+
+// Re-export shared app-core modules from bolt-app-core.
+// Extracted in NATIVE-APP-CORE-1 + lifecycle/bridge extraction.
+pub(crate) use bolt_app_core::ipc_types;
+pub(crate) use bolt_app_core::platform;
+pub(crate) use bolt_app_core::signal_monitor;
+pub(crate) use bolt_app_core::watchdog;
 
 use bolt_rendezvous::SignalingServer;
 use std::net::SocketAddr;
@@ -15,7 +15,7 @@ use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
 use daemon::DaemonManager;
-use tauri::Manager;
+use tauri::{Emitter as _, Manager};
 
 /// Spawn the embedded signaling server on a background thread.
 ///
@@ -63,7 +63,14 @@ pub fn run() {
             app.manage(manager);
 
             // Start signal health monitor (N8 — observability only)
-            signal_monitor::start_signal_monitor(app.handle().clone(), shutdown_flag);
+            // Wire the callback-based core monitor to Tauri event emission.
+            let app_handle = app.handle().clone();
+            signal_monitor::start_signal_monitor(
+                shutdown_flag,
+                Box::new(move |event| {
+                    let _ = app_handle.emit("signal://status", event);
+                }),
+            );
 
             Ok(())
         })

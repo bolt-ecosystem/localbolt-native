@@ -272,6 +272,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bolt-app-core"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "bolt-rendezvous"
 version = "0.1.1"
 dependencies = [
@@ -1950,6 +1960,7 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 name = "localbolt-app"
 version = "1.0.0"
 dependencies = [
+ "bolt-app-core",
  "bolt-rendezvous",
  "libc",
  "serde",

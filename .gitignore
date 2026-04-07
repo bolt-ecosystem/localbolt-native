@@ -5,3 +5,10 @@ coverage/
 .DS_Store
 *.log
 src-tauri/bin/
+.gitnexus
+.claude/
+AGENTS.md
+CLAUDE.md
+native/macos/build/
+native/macos/build-x86_64/
+native/macos/.build/
