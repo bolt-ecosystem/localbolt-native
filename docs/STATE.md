@@ -7,8 +7,8 @@
 
 ## Latest Release
 
-- **Tag (pushed):** localbolt-app-v1.2.27-tofu-pin-store
-- **HEAD:** e93a7cc
+- **Tag (pushed):** localbolt-app-v1.2.28-ux-parity-m4-m7
+- **HEAD:** a0f9d91
 - **Date:** 2026-04-07
 - **Tests:** 82 Rust (native/shared) + contract parity tests
 
@@ -74,7 +74,7 @@
 - **Tests:** 82+ Rust (native/shared, including 5 FFI crash-fix tests + contract parity)
 - **src-tauri:** **Retired.** Tauri desktop path superseded by native SwiftUI shell. Thin glue remains, not receiving forward investment.
 - **native/shared:** Rust C-ABI FFI bridge to bolt-app-core. Produces libbolt_native_bridge.a (static). Always rebuilt by build-app.sh (ABI mismatch prevention).
-- **native/macos:** macOS SwiftUI shell — forward native product path. Full transfer vertical: discovery, connect, pair, verify (with SAS reject), send/receive with progress, .app bundle with daemon sidecar. Safety controls M1-M3 implemented. NATIVE-SHELL-1, NATIVE-SHELL-UX-1, NATIVE-UX-SAFETY-CONTROLS-1 (partial) CLOSED.
+- **native/macos:** macOS SwiftUI shell — forward native product path. Full transfer vertical: discovery, connect, pair, verify (with SAS reject), send/receive with progress, .app bundle with daemon sidecar. Safety controls M1-M3 implemented. UX parity M4-M7 implemented (file queue, multi-file, cancel, TOFU mismatch alert). All 7 MUST-MATCH items complete. NATIVE-SHELL-1, NATIVE-SHELL-UX-1, NATIVE-UX-SAFETY-CONTROLS-1 (partial), NATIVE-UX-PARITY-IMPL-2 CLOSED.
 - **bolt-ui (egui):** Historical desktop shell in bolt-core-sdk. Superseded by native shells for forward development.
 
 ## TOFU Pin Persistence (v1.2.27)
@@ -90,6 +90,7 @@
 
 | Stream | Status | Commits |
 |--------|--------|---------|
+| NATIVE-UX-PARITY-IMPL-2 (M4-M7 UX parity) | DONE | `a0f9d91` |
 | RECONNECT-INTEGRITY-1 (TOFU pin store) | DONE | `e93a7cc` |
 | NATIVE-SHELL-1 closure (Tauri retirement) | DONE | `14094ed` |
 | SIGNALING-FFI-CRASH-FIX-1 | DONE | `219aedd` |
@@ -97,4 +98,4 @@
 
 ## Known Open Issues
 
-- **NATIVE-UX-PARITY-IMPL-2** — 4 remaining MUST-MATCH items (M4-M7).
+None.

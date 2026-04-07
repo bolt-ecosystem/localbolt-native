@@ -4,6 +4,46 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.28-ux-parity-m4-m7 — 2026-04-07
+
+**Commit:** a0f9d91
+
+feat: UX parity M4-M7 — file queue, cancel, TOFU mismatch alert.
+
+Implements the remaining four MUST-MATCH items (M4-M7) from the
+NATIVE-UX-PARITY-IMPL-2 workstream, bringing the macOS native shell to
+full UX parity with the web client.
+
+**M4 — Explicit transfer initiation:** File selection (NSOpenPanel) and
+drag-and-drop now add files to a queue instead of auto-sending. A "Send N
+Files" button triggers transfer explicitly, giving users a chance to review
+before committing.
+
+**M5 — Multi-file support:** NSOpenPanel `allowsMultipleSelection` enabled.
+Queue UI shows all selected files with individual remove (x) buttons.
+Duplicate detection prevents the same URL from being queued twice.
+Sequential send: after each transfer completes, the next file in the queue
+is sent automatically via `sendNextOrClear()`.
+
+**M6 — Cancel transfer:** A "Cancel Transfer" button appears during active
+send/receive progress. Cancellation clears the file queue and disconnects
+the session (`disconnectSession(reason: "transfer cancelled")`).
+
+**M7 — TOFU identity mismatch alert:** `PinStore` now tracks `deviceName`
+alongside identity keys. On SAS negotiation, `checkMismatch()` detects if
+a device name was previously verified with a different identity key. When a
+mismatch is found, the UI shows a red security warning with the old key
+prefix and a Disconnect button. The `.mismatch` trust state blocks transfers
+via `isTransferAllowed()`.
+
+Workstream: NATIVE-UX-PARITY-IMPL-2.
+
+**Files changed:**
+- native/macos/Sources/LocalBolt/BoltBridge.swift
+- native/macos/Sources/LocalBolt/LocalBoltApp.swift
+
+---
+
 ## localbolt-app-v1.2.27-tofu-pin-store — 2026-04-07
 
 **Commit:** e93a7cc
