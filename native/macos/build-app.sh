@@ -22,12 +22,10 @@ ENTITLEMENTS="$SCRIPT_DIR/Resources/LocalBolt.entitlements"
 
 echo "=== Building ${APP_NAME}.app (${BUILD_MODE}) ==="
 
-# Step 1: Ensure Rust native bridge is built (static lib)
+# Step 1: Always rebuild Rust native bridge (ensures ABI sync with bolt-app-core)
 RUST_LIB="../shared/target/release/libbolt_native_bridge.a"
-if [ ! -f "$RUST_LIB" ]; then
-    echo "[BUILD] Building Rust native bridge..."
-    (cd ../shared && cargo build --release)
-fi
+echo "[BUILD] Building Rust native bridge..."
+(cd ../shared && cargo build --release)
 echo "[BUILD] Rust bridge: $RUST_LIB (static)"
 
 # Step 2: Build Swift executable

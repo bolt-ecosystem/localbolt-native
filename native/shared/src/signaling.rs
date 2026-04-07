@@ -14,6 +14,10 @@ pub struct BoltPeer {
     pub peer_code: *mut c_char,
     pub device_name: *mut c_char,
     pub device_type: *mut c_char,
+    /// WebTransport URL (null if not available).
+    pub wt_url: *mut c_char,
+    /// WebTransport TLS cert SHA-256 hash hex (null if not available).
+    pub wt_cert_hash: *mut c_char,
 }
 
 /// Signaling event type.
@@ -58,20 +62,26 @@ enum SignalingEventInternal {
 /// `cloud_url` — cloud signaling URL (e.g. wss://bolt-rendezvous.fly.dev), or null
 /// `peer_code` — this device's peer code
 /// `device_name` — this device's name
+/// `wt_url` — WebTransport URL to advertise (null if WT not available)
+/// `wt_cert_hash` — WebTransport cert hash hex (null if WT not available)
 ///
 /// # Safety
-/// All string parameters must be valid null-terminated C strings.
+/// All string parameters must be valid null-terminated C strings (or null for optional).
 #[no_mangle]
 pub unsafe extern "C" fn bolt_signaling_start(
     local_url: *const c_char,
     cloud_url: *const c_char,
     peer_code: *const c_char,
     device_name: *const c_char,
+    wt_url: *const c_char,
+    wt_cert_hash: *const c_char,
 ) -> *mut BoltSignaling {
     let local = cstr_to_string(local_url);
     let cloud = if cloud_url.is_null() { None } else { Some(cstr_to_string(cloud_url)) };
     let code = cstr_to_string(peer_code);
     let name = cstr_to_string(device_name);
+    let wt_url_opt = if wt_url.is_null() { None } else { Some(cstr_to_string(wt_url)) };
+    let wt_hash_opt = if wt_cert_hash.is_null() { None } else { Some(cstr_to_string(wt_cert_hash)) };
 
     let events: Arc<Mutex<Vec<SignalingEventInternal>>> = Arc::new(Mutex::new(Vec::new()));
     let peers: Arc<Mutex<Vec<PeerInfo>>> = Arc::new(Mutex::new(Vec::new()));
@@ -89,6 +99,8 @@ pub unsafe extern "C" fn bolt_signaling_start(
         peer_code: code.clone(),
         device_name: name,
         device_type: "desktop".to_string(),
+        wt_url: wt_url_opt,
+        wt_cert_hash: wt_hash_opt,
     };
 
     let handle = signaling_client::spawn_signaling_client(
@@ -190,10 +202,20 @@ pub unsafe extern "C" fn bolt_signaling_get_peer(
     if i >= peers.len() { return std::ptr::null_mut(); }
 
     let peer = &peers[i];
+    let wt_url_ptr = peer.wt_url.as_ref()
+        .and_then(|s| CString::new(s.as_str()).ok())
+        .map(|cs| cs.into_raw())
+        .unwrap_or(std::ptr::null_mut());
+    let wt_hash_ptr = peer.wt_cert_hash.as_ref()
+        .and_then(|s| CString::new(s.as_str()).ok())
+        .map(|cs| cs.into_raw())
+        .unwrap_or(std::ptr::null_mut());
     Box::into_raw(Box::new(BoltPeer {
         peer_code: CString::new(peer.peer_code.as_str()).unwrap().into_raw(),
         device_name: CString::new(peer.device_name.as_str()).unwrap().into_raw(),
         device_type: CString::new(peer.device_type.as_str()).unwrap().into_raw(),
+        wt_url: wt_url_ptr,
+        wt_cert_hash: wt_hash_ptr,
     }))
 }
 
@@ -208,6 +230,8 @@ pub unsafe extern "C" fn bolt_peer_free(peer: *mut BoltPeer) {
     if !p.peer_code.is_null() { let _ = CString::from_raw(p.peer_code); }
     if !p.device_name.is_null() { let _ = CString::from_raw(p.device_name); }
     if !p.device_type.is_null() { let _ = CString::from_raw(p.device_type); }
+    if !p.wt_url.is_null() { let _ = CString::from_raw(p.wt_url); }
+    if !p.wt_cert_hash.is_null() { let _ = CString::from_raw(p.wt_cert_hash); }
 }
 
 /// Check if signaling is connected to at least one plane.
@@ -297,4 +321,109 @@ pub unsafe extern "C" fn bolt_signaling_stop(handle: *mut BoltSignaling) {
 fn cstr_to_string(ptr: *const c_char) -> String {
     if ptr.is_null() { return String::new(); }
     unsafe { CStr::from_ptr(ptr).to_str().unwrap_or("").to_string() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: construct a BoltPeer from PeerInfo and verify field values.
+    /// Exercises the same code path as bolt_signaling_get_peer without needing
+    /// a live signaling handle.
+    fn make_bolt_peer(peer: &PeerInfo) -> *mut BoltPeer {
+        let wt_url_ptr = peer.wt_url.as_ref()
+            .and_then(|s| CString::new(s.as_str()).ok())
+            .map(|cs| cs.into_raw())
+            .unwrap_or(std::ptr::null_mut());
+        let wt_hash_ptr = peer.wt_cert_hash.as_ref()
+            .and_then(|s| CString::new(s.as_str()).ok())
+            .map(|cs| cs.into_raw())
+            .unwrap_or(std::ptr::null_mut());
+        Box::into_raw(Box::new(BoltPeer {
+            peer_code: CString::new(peer.peer_code.as_str()).unwrap().into_raw(),
+            device_name: CString::new(peer.device_name.as_str()).unwrap().into_raw(),
+            device_type: CString::new(peer.device_type.as_str()).unwrap().into_raw(),
+            wt_url: wt_url_ptr,
+            wt_cert_hash: wt_hash_ptr,
+        }))
+    }
+
+    #[test]
+    fn bolt_peer_without_wt_has_null_pointers() {
+        let peer = PeerInfo {
+            peer_code: "BROWSER1".into(),
+            device_name: "Chrome".into(),
+            device_type: "browser".into(),
+            wt_url: None,
+            wt_cert_hash: None,
+        };
+        let ptr = make_bolt_peer(&peer);
+        unsafe {
+            let p = &*ptr;
+            assert!(!p.peer_code.is_null());
+            assert!(!p.device_name.is_null());
+            assert!(p.wt_url.is_null(), "wt_url must be null for browser peer");
+            assert!(p.wt_cert_hash.is_null(), "wt_cert_hash must be null for browser peer");
+            bolt_peer_free(ptr);
+        }
+    }
+
+    #[test]
+    fn bolt_peer_with_wt_has_valid_pointers() {
+        let peer = PeerInfo {
+            peer_code: "NATIVE1".into(),
+            device_name: "Mac Studio".into(),
+            device_type: "desktop".into(),
+            wt_url: Some("https://192.168.1.10:9871".into()),
+            wt_cert_hash: Some("abcdef1234567890".into()),
+        };
+        let ptr = make_bolt_peer(&peer);
+        unsafe {
+            let p = &*ptr;
+            assert!(!p.wt_url.is_null(), "wt_url must be non-null for WT peer");
+            assert!(!p.wt_cert_hash.is_null(), "wt_cert_hash must be non-null for WT peer");
+            let url = CStr::from_ptr(p.wt_url).to_str().unwrap();
+            let hash = CStr::from_ptr(p.wt_cert_hash).to_str().unwrap();
+            assert_eq!(url, "https://192.168.1.10:9871");
+            assert_eq!(hash, "abcdef1234567890");
+            bolt_peer_free(ptr);
+        }
+    }
+
+    #[test]
+    fn bolt_peer_repeated_construction_is_stable() {
+        let peer = PeerInfo {
+            peer_code: "REPEAT1".into(),
+            device_name: "Test".into(),
+            device_type: "browser".into(),
+            wt_url: None,
+            wt_cert_hash: None,
+        };
+        // Simulate 50 poll cycles — each constructs and frees a BoltPeer
+        for _ in 0..50 {
+            let ptr = make_bolt_peer(&peer);
+            unsafe {
+                let p = &*ptr;
+                assert!(p.wt_url.is_null());
+                assert!(p.wt_cert_hash.is_null());
+                bolt_peer_free(ptr);
+            }
+        }
+    }
+
+    #[test]
+    fn peer_info_deserializes_without_wt_fields() {
+        let json = r#"{"peer_code":"X","device_name":"Phone","device_type":"phone"}"#;
+        let peer: PeerInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(peer.wt_url, None);
+        assert_eq!(peer.wt_cert_hash, None);
+    }
+
+    #[test]
+    fn peer_info_deserializes_with_wt_fields() {
+        let json = r#"{"peer_code":"Y","device_name":"Mac","device_type":"desktop","wt_url":"https://10.0.0.1:9871","wt_cert_hash":"deadbeef"}"#;
+        let peer: PeerInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(peer.wt_url.as_deref(), Some("https://10.0.0.1:9871"));
+        assert_eq!(peer.wt_cert_hash.as_deref(), Some("deadbeef"));
+    }
 }

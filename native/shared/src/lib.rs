@@ -81,6 +81,9 @@ pub unsafe extern "C" fn bolt_free_string(ptr: *mut c_char) {
 }
 
 #[cfg(test)]
+mod contract_parity;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

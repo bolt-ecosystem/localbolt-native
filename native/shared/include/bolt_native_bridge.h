@@ -66,6 +66,15 @@ char* bolt_daemon_data_dir(BoltDaemon* handle);
 /// Returns 1 on success, 0 on failure.
 int bolt_daemon_send_file(BoltDaemon* handle, const char* file_path);
 
+/// Request the daemon to disconnect the active session (NATIVE-SESSION-UX-2).
+/// Returns 1 on success, 0 on failure.
+int bolt_daemon_disconnect_session(BoltDaemon* handle);
+
+/// Connect to a remote daemon's WS endpoint (NATIVE-CONNECT-1).
+/// ws_url: remote daemon wsUrl, e.g. "ws://192.168.4.36:9100".
+/// Returns 1 on success, 0 on failure.
+int bolt_daemon_connect_remote(BoltDaemon* handle, const char* ws_url);
+
 /// Stop the daemon and free the handle.
 /// After this call, handle is invalid.
 void bolt_daemon_stop(BoltDaemon* handle);
@@ -80,14 +89,18 @@ typedef struct {
     char* peer_code;
     char* device_name;
     char* device_type;
+    char* wt_url;       // null if WebTransport not available
+    char* wt_cert_hash; // null if WebTransport not available
 } BoltPeer;
 
-/// Start signaling client. cloud_url may be null.
+/// Start signaling client. cloud_url, wt_url, wt_cert_hash may be null.
 BoltSignaling* bolt_signaling_start(
     const char* local_url,
     const char* cloud_url,
     const char* peer_code,
-    const char* device_name
+    const char* device_name,
+    const char* wt_url,
+    const char* wt_cert_hash
 );
 
 /// Number of currently discovered peers.

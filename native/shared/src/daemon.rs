@@ -245,6 +245,60 @@ pub unsafe extern "C" fn bolt_daemon_send_file(
     }
 }
 
+/// Request the daemon to disconnect the active session (NATIVE-SESSION-UX-2).
+/// Returns 1 on success, 0 on failure.
+///
+/// # Safety
+/// `handle` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_daemon_disconnect_session(
+    handle: *mut BoltDaemon,
+) -> i32 {
+    if handle.is_null() { return 0; }
+    let daemon = &*handle;
+    let signal_path = format!("{}/disconnect_session.signal", daemon.data_dir);
+    match std::fs::write(&signal_path, "disconnect") {
+        Ok(()) => {
+            eprintln!("[NATIVE_BRIDGE] wrote disconnect_session.signal");
+            1
+        }
+        Err(e) => {
+            eprintln!("[NATIVE_BRIDGE] failed to write disconnect_session.signal: {e}");
+            0
+        }
+    }
+}
+
+/// Trigger an outbound WS connection to a remote daemon (NATIVE-CONNECT-1).
+/// `ws_url` — remote daemon wsUrl, e.g. "ws://192.168.4.36:9100" (C string).
+/// Returns 1 on success, 0 on failure.
+///
+/// # Safety
+/// `handle` must be valid. `ws_url` must be a null-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_daemon_connect_remote(
+    handle: *mut BoltDaemon,
+    ws_url: *const c_char,
+) -> i32 {
+    if handle.is_null() || ws_url.is_null() { return 0; }
+    let daemon = &*handle;
+    let url = match CStr::from_ptr(ws_url).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let signal_path = format!("{}/connect_remote.signal", daemon.data_dir);
+    match std::fs::write(&signal_path, url) {
+        Ok(()) => {
+            eprintln!("[NATIVE_BRIDGE] wrote connect_remote.signal: {url}");
+            1
+        }
+        Err(e) => {
+            eprintln!("[NATIVE_BRIDGE] failed to write connect_remote.signal: {e}");
+            0
+        }
+    }
+}
+
 /// Stop the daemon and free the handle.
 ///
 /// # Safety
