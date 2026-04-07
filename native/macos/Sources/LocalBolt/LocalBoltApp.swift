@@ -27,7 +27,7 @@ private func localIPAddress() -> String {
     return address
 }
 
-/// Connection request phases (matches web: requesting → establishing → slow)
+/// UI-only connecting animation phase (product-specific, not canonical).
 enum ConnectingPhase {
     case requesting   // "Waiting for [device] to accept..."
     case establishing // "Establishing secure connection..."
@@ -71,20 +71,23 @@ struct LocalBoltApp: App {
             case "connection_request":
                 let deviceName = signal.data["deviceName"] as? String ?? "Unknown Device"
                 let deviceType = signal.data["deviceType"] as? String ?? "desktop"
-                // Surface inline in the transfer card
+                _ = ipc.receiveRequest()
                 signaling.incomingConnectionRequest = IncomingSignal(
                     from: signal.from,
                     signalType: signal.signalType,
                     data: ["deviceName": deviceName, "deviceType": deviceType]
                 )
             case "connection_accepted":
-                // Remote peer accepted our request — they may provide wsUrl for direct connect
-                // (browser→native: browser accepted, provides nothing — session via WebRTC)
-                // (native→browser: browser accepted, we already have WS)
-                break
+                _ = ipc.beginConnecting()
+                if let wsUrl = signal.data["wsUrl"] as? String, !wsUrl.isEmpty {
+                    daemon.connectToRemote(wsUrl: wsUrl)
+                } else {
+                    print("[CONNECT] connection_accepted without wsUrl — cannot establish direct WS")
+                    ipc.resetSession()
+                }
             case "connection_declined":
-                // Remote peer declined — clear connecting state
-                break
+                // Remote peer declined — M2 onChange handler shows notice + resets
+                signaling.connectionDeclined = true
             default:
                 break
             }
@@ -94,11 +97,37 @@ struct LocalBoltApp: App {
     private func autoStart() {
         guard daemon.daemonBinaryPath != nil, !daemon.isRunning else { return }
         daemon.start()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            signaling.start(localUrl: "ws://127.0.0.1:3001", cloudUrl: "wss://bolt-rendezvous.fly.dev")
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            ipc.start(socketPath: daemon.socketPath)
+        let wtInfoPath = "\(daemon.dataDir)/wt_info.json"
+        let pollInterval: TimeInterval = 0.25
+        let maxAttempts = 20 // 5s total timeout
+        DispatchQueue.global(qos: .utility).async {
+            var attempts = 0
+            while attempts < maxAttempts {
+                if FileManager.default.fileExists(atPath: wtInfoPath) {
+                    break
+                }
+                attempts += 1
+                Thread.sleep(forTimeInterval: pollInterval)
+            }
+            DispatchQueue.main.async {
+                // Read WT metadata (best-effort — nil values are safe)
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: wtInfoPath)),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let port = json["wt_port"] as? Int {
+                        self.daemon.wtUrl = "https://\(localIPAddress()):\(port)"
+                    }
+                    self.daemon.wtCertHash = json["wt_cert_hash"] as? String
+                }
+                self.signaling.start(
+                    localUrl: "ws://127.0.0.1:3001",
+                    cloudUrl: "wss://bolt-rendezvous.fly.dev",
+                    wtUrl: self.daemon.wtUrl,
+                    wtCertHash: self.daemon.wtCertHash
+                )
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.ipc.start(socketPath: self.daemon.socketPath)
+                }
+            }
         }
     }
 }
@@ -112,13 +141,17 @@ struct ContentView: View {
     @Binding var showDiagnostics: Bool
     @State private var showDeviceList = false
     @State private var isDragOver = false
-    @State private var connectingTo: DiscoveredPeer? = nil
+    // UI-only animation phase (product-specific, not canonical truth)
     @State private var connectingPhase: ConnectingPhase = .requesting
     @State private var connectingTimer: Timer? = nil
+    /// Transient notice shown when remote peer declines connection (M2).
+    @State private var declinedNotice: String? = nil
+    /// Transient notice shown after SAS rejection (M3).
+    @State private var rejectionNotice: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
-            // ── Header (matches web: 48px, bolt icon, brand, status) ──
+            // ── Header ──
             HStack {
                 Image(systemName: "bolt.fill")
                     .font(.system(size: 12))
@@ -161,6 +194,18 @@ struct ContentView: View {
         .sheet(isPresented: $showDiagnostics) {
             DiagnosticsView(daemon: daemon, ipc: ipc, signaling: signaling)
         }
+        .onChange(of: signaling.connectionDeclined) {
+            if signaling.connectionDeclined {
+                signaling.connectionDeclined = false
+                clearConnectingUI()
+                // M2: Show visible feedback that remote declined
+                ipc.resetSession()
+                withAnimation { declinedNotice = "Connection declined by remote device" }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    withAnimation { declinedNotice = nil }
+                }
+            }
+        }
     }
 
     // MARK: - Startup
@@ -185,11 +230,11 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Transfer Card (matches web: centered, bordered, glow)
+    // MARK: - Transfer Card
 
     private var transferCard: some View {
         VStack(spacing: 0) {
-            // Encryption badge (matches web: shield + "End-to-End Encrypted")
+            // Encryption badge
             HStack(spacing: 6) {
                 Image(systemName: ipc.sessionPhase == .connected ? "lock.shield.fill" : "lock.shield")
                     .font(.system(size: 13))
@@ -202,20 +247,60 @@ struct ContentView: View {
 
             Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
 
-            // Card content: priority order matches web exactly
-            // 1. connected > 2. incoming request > 3. connecting > 4. device list > 5. button
-            if ipc.sessionPhase == .connected, let peer = ipc.connectedPeer {
-                sessionContent(peer: peer)
-                    .onAppear { cancelConnection() }
-            } else if let req = signaling.incomingConnectionRequest {
-                incomingRequestContent(request: req)
-            } else if let target = connectingTo {
-                connectingContent(target: target)
-            } else {
+            // Card content: canonical phase drives view selection
+            switch ipc.sessionPhase {
+            case .connected:
+                if let peer = ipc.connectedPeer {
+                    sessionContent(peer: peer)
+                        .onAppear { clearConnectingUI() }
+                }
+            case .incomingRequest:
+                if let req = signaling.incomingConnectionRequest {
+                    incomingRequestContent(request: req)
+                }
+            case .requesting, .connecting:
+                if let target = ipc.pendingInitiatorPeer {
+                    connectingContent(target: target)
+                }
+            case .idle, .disconnected:
                 discoveryContent
             }
 
-            // Session ended
+            // M2: Declined-by-remote inline notice
+            if let notice = declinedNotice {
+                Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                HStack(spacing: 8) {
+                    Image(systemName: "hand.raised")
+                        .font(.system(size: 12))
+                        .foregroundColor(.red.opacity(0.7))
+                    Text(notice)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.5))
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .transition(.opacity)
+            }
+
+            // M3: SAS rejection inline notice
+            if let notice = rejectionNotice {
+                Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                HStack(spacing: 8) {
+                    Image(systemName: "shield.slash")
+                        .font(.system(size: 12))
+                        .foregroundColor(.red.opacity(0.7))
+                    Text(notice)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.5))
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .transition(.opacity)
+            }
+
+            // Presentation-only disconnect notice
             if case .disconnected(let reason) = ipc.sessionPhase {
                 Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
                 HStack {
@@ -223,7 +308,7 @@ struct ContentView: View {
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.3))
                     Spacer()
-                    Button("Dismiss") { ipc.resetSession() }
+                    Button("Dismiss") { ipc.dismissDisconnect() }
                         .buttonStyle(.plain)
                         .font(.system(size: 11))
                         .foregroundColor(neon)
@@ -241,12 +326,11 @@ struct ContentView: View {
         .shadow(color: neon.opacity(0.08), radius: 30)
     }
 
-    // MARK: - Discovery (matches web: "Devices" button → list)
+    // MARK: - Discovery
 
     private var discoveryContent: some View {
         VStack(spacing: 0) {
             if !showDeviceList {
-                // Default: "Devices" button (matches web exactly)
                 Button(action: { withAnimation(.easeInOut(duration: 0.15)) { showDeviceList = true } }) {
                     HStack(spacing: 8) {
                         Image(systemName: "iphone")
@@ -277,13 +361,11 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .padding(.vertical, 16)
 
-                // Peer code (subtle, below devices — matches web "Legacy Peer" area)
                 Text(signaling.peerCode)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(0.2))
                     .padding(.bottom, 12)
             } else {
-                // Device list (matches web popup)
                 VStack(spacing: 0) {
                     HStack {
                         Text("Select a device")
@@ -345,15 +427,14 @@ struct ContentView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(.white.opacity(0.001)) // hit target
-        .disabled(!ipc.isConnected)
+        .background(.white.opacity(0.001))
+        .disabled(!ipc.isConnected || ipc.sessionPhase != .idle)
     }
 
-    // MARK: - Connecting (matches web: awaiting approval)
+    // MARK: - Connecting (UI animation, product-specific)
 
     private func connectingContent(target: DiscoveredPeer) -> some View {
         VStack(spacing: 12) {
-            // Pulsing indicator (matches web: nested circles)
             ZStack {
                 Circle()
                     .fill(neon.opacity(0.05))
@@ -369,7 +450,6 @@ struct ContentView: View {
             }
             .padding(.top, 8)
 
-            // Status text (matches web phases)
             VStack(spacing: 4) {
                 switch connectingPhase {
                 case .requesting:
@@ -397,9 +477,13 @@ struct ContentView: View {
             }
             .multilineTextAlignment(.center)
 
-            // Cancel button (matches web: subtle text button)
             Button("Cancel") {
-                cancelConnection()
+                // M1: Send decline signal to remote before resetting
+                if let target = ipc.pendingInitiatorPeer {
+                    signaling.sendSignal(toPeerCode: target.peerCode, signalType: "connection_declined")
+                }
+                ipc.resetSession()
+                clearConnectingUI()
             }
             .buttonStyle(.plain)
             .font(.system(size: 12))
@@ -410,14 +494,13 @@ struct ContentView: View {
         .padding(.vertical, 8)
     }
 
-    // MARK: - Incoming Request (inline, matches web)
+    // MARK: - Incoming Request (inline)
 
     private func incomingRequestContent(request: IncomingSignal) -> some View {
         let deviceName = request.data["deviceName"] as? String ?? "Unknown Device"
         let deviceType = request.data["deviceType"] as? String ?? "desktop"
 
         return VStack(spacing: 12) {
-            // Device info
             HStack(spacing: 10) {
                 Image(systemName: deviceIcon(deviceType))
                     .font(.system(size: 20))
@@ -433,12 +516,11 @@ struct ContentView: View {
                 Spacer()
             }
 
-            // Accept / Decline
             HStack(spacing: 12) {
                 Button(action: {
-                    // Decline: clear request, send declined signal
                     signaling.sendSignal(toPeerCode: request.from, signalType: "connection_declined")
                     signaling.incomingConnectionRequest = nil
+                    ipc.resetSession()
                 }) {
                     Text("Decline")
                         .frame(maxWidth: .infinity)
@@ -447,15 +529,27 @@ struct ContentView: View {
                 .tint(.red.opacity(0.8))
 
                 Button(action: {
-                    // Accept: send connection_accepted with wsUrl, clear request
                     let wsPort = daemon.wsPort
                     let wsUrl = "ws://\(localIPAddress()):\(wsPort)"
+                    var acceptDict: [String: String] = ["wsUrl": wsUrl]
+                    if let wtUrl = daemon.wtUrl { acceptDict["wtUrl"] = wtUrl }
+                    if let wtHash = daemon.wtCertHash { acceptDict["certHash"] = wtHash }
+                    let acceptJson = (try? JSONSerialization.data(withJSONObject: acceptDict))
+                        .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
                     signaling.sendSignal(
                         toPeerCode: request.from,
                         signalType: "connection_accepted",
-                        dataJson: "{\"wsUrl\":\"\(wsUrl)\"}"
+                        dataJson: acceptJson
                     )
                     signaling.incomingConnectionRequest = nil
+                    // Stash peer info for session.connected resolution
+                    ipc.pendingAcceptPeer = PeerSession(
+                        peerCode: request.from,
+                        deviceName: deviceName,
+                        deviceType: deviceType,
+                        trust: .legacy
+                    )
+                    _ = ipc.beginConnecting()
                 }) {
                     Text("Accept")
                         .frame(maxWidth: .infinity)
@@ -471,7 +565,6 @@ struct ContentView: View {
 
     private func sessionContent(peer: PeerSession) -> some View {
         VStack(spacing: 0) {
-            // Connected device header — prominent
             HStack(spacing: 10) {
                 Image(systemName: "link.circle.fill")
                     .font(.system(size: 20))
@@ -483,7 +576,10 @@ struct ContentView: View {
                     trustLabel(peer: peer)
                 }
                 Spacer()
-                Button(action: { ipc.disconnectSession() }) {
+                Button(action: {
+                    daemon.requestDisconnect()
+                    ipc.disconnectSession(reason: "user initiated")
+                }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.3))
@@ -494,7 +590,7 @@ struct ContentView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
 
-            // SAS verification prompt (only when unverified — blocks transfer)
+            // SAS verification prompt (blocks transfer per P1)
             if case .unverified(let sas) = peer.trust {
                 Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
                 VStack(spacing: 10) {
@@ -505,26 +601,43 @@ struct ContentView: View {
                         .font(.system(size: 22, weight: .bold, design: .monospaced))
                         .foregroundColor(.yellow)
                         .tracking(4)
-                    Button(action: { ipc.markVerified() }) {
-                        Text("Confirm Match")
-                            .frame(maxWidth: .infinity)
+                    HStack(spacing: 12) {
+                        // M3: SAS reject button — disconnect session, show notice
+                        Button(action: {
+                            daemon.requestDisconnect()
+                            ipc.disconnectSession(reason: "identity not verified")
+                            withAnimation { rejectionNotice = "Connection closed — peer identity was not verified" }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                                withAnimation { rejectionNotice = nil }
+                            }
+                        }) {
+                            Text("Reject")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red.opacity(0.8))
+                        .controlSize(.regular)
+
+                        Button(action: { ipc.markVerified() }) {
+                            Text("Confirm Match")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(neon)
+                        .controlSize(.regular)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(neon)
-                    .controlSize(.regular)
                 }
                 .padding(16)
             }
 
-            // Transfer area (gated by trust — matches web policy)
-            if peer.trust == .verified || peer.trust == .legacy {
+            // Transfer area — gated by canonical policy P1
+            if isTransferAllowed(sessionPhase: ipc.sessionPhase, trust: peer.trust) {
                 Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
                 transferArea
             }
         }
     }
 
-    /// Compact trust label shown beside device name in the connected header.
     @ViewBuilder
     private func trustLabel(peer: PeerSession) -> some View {
         switch peer.trust {
@@ -558,13 +671,12 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Transfer Area (matches web: drop zone + progress)
+    // MARK: - Transfer Area
 
     private var transferArea: some View {
         Group {
             switch ipc.transferPhase {
             case .idle:
-                // Drop zone (matches web: dashed border, "Drop files here")
                 VStack(spacing: 12) {
                     Image(systemName: "square.and.arrow.up")
                         .font(.system(size: 24))
@@ -655,38 +767,50 @@ struct ContentView: View {
     // MARK: - Connection Management
 
     func initiateConnection(to peer: DiscoveredPeer) {
+        // Canonical transition: idle → requesting
+        guard ipc.beginRequest(peer: peer) else { return }
         withAnimation(.easeInOut(duration: 0.15)) {
-            connectingTo = peer
-            connectingPhase = .requesting
             showDeviceList = false
         }
-        // Send connection_request with wsUrl (matches web protocol)
+
+        // Send connection_request with wsUrl + WT metadata
         let wsPort = daemon.wsPort
         let wsUrl = "ws://\(localIPAddress()):\(wsPort)"
         let deviceName = Host.current().localizedName ?? "Mac"
-        let payload = "{\"deviceName\":\"\(deviceName)\",\"deviceType\":\"desktop\",\"wsUrl\":\"\(wsUrl)\"}"
+        var payloadDict: [String: String] = [
+            "deviceName": deviceName,
+            "deviceType": "desktop",
+            "wsUrl": wsUrl,
+        ]
+        if let wtUrl = daemon.wtUrl { payloadDict["wtUrl"] = wtUrl }
+        if let wtHash = daemon.wtCertHash { payloadDict["certHash"] = wtHash }
+        let payload = (try? JSONSerialization.data(withJSONObject: payloadDict))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         signaling.sendSignal(toPeerCode: peer.peerCode, signalType: "connection_request", dataJson: payload)
 
-        // Phase transitions: requesting (0s) → establishing (3s) → slow (8s)
+        // UI-only animation phase timers (product-specific)
+        startConnectingTimers()
+    }
+
+    /// Clear UI-only connecting animation state.
+    func clearConnectingUI() {
         connectingTimer?.invalidate()
+        connectingTimer = nil
+        connectingPhase = .requesting
+    }
+
+    private func startConnectingTimers() {
+        connectingTimer?.invalidate()
+        connectingPhase = .requesting
         connectingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [self] _ in
-            if connectingTo != nil && ipc.sessionPhase != .connected {
+            if ipc.sessionPhase == .requesting || ipc.sessionPhase == .connecting {
                 withAnimation { connectingPhase = .establishing }
                 connectingTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { _ in
-                    if connectingTo != nil && ipc.sessionPhase != .connected {
+                    if ipc.sessionPhase == .requesting || ipc.sessionPhase == .connecting {
                         withAnimation { connectingPhase = .slow }
                     }
                 }
             }
-        }
-    }
-
-    func cancelConnection() {
-        connectingTimer?.invalidate()
-        connectingTimer = nil
-        withAnimation(.easeInOut(duration: 0.15)) {
-            connectingTo = nil
-            connectingPhase = .requesting
         }
     }
 
@@ -842,6 +966,10 @@ struct DiagnosticsView: View {
                 GridRow {
                     Text("Session").foregroundColor(.secondary)
                     Text("\(String(describing: ipc.sessionPhase))")
+                }
+                GridRow {
+                    Text("Generation").foregroundColor(.secondary)
+                    Text("\(ipc.generation)")
                 }
             }
             .font(.system(size: 12, design: .monospaced))

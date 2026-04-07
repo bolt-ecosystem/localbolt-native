@@ -56,6 +56,10 @@ final class DaemonManager {
     private(set) var socketPath: String = ""
     private(set) var dataDir: String = ""
     private(set) var daemonBinaryPath: String?
+    /// WebTransport URL (set after reading wt_info.json from daemon data_dir).
+    var wtUrl: String?
+    /// WebTransport cert hash hex (set after reading wt_info.json from daemon data_dir).
+    var wtCertHash: String?
 
     private var handle: OpaquePointer?
     private var pollTimer: Timer?
@@ -123,6 +127,22 @@ final class DaemonManager {
         }
     }
 
+    /// Connect to a remote daemon's WS endpoint (NATIVE-CONNECT-1).
+    @discardableResult
+    func connectToRemote(wsUrl: String) -> Bool {
+        guard let h = handle else { return false }
+        return wsUrl.withCString { cUrl in
+            bolt_daemon_connect_remote(h, cUrl) == 1
+        }
+    }
+
+    /// Request the daemon to disconnect the active WS session (NATIVE-SESSION-UX-2).
+    @discardableResult
+    func requestDisconnect() -> Bool {
+        guard let h = handle else { return false }
+        return bolt_daemon_disconnect_session(h) == 1
+    }
+
     /// Poll daemon state (called on timer).
     private func poll() {
         guard let h = handle else { return }
@@ -160,6 +180,10 @@ struct DiscoveredPeer: Identifiable {
     let peerCode: String
     let deviceName: String
     let deviceType: String
+    /// WebTransport URL (nil if peer doesn't support WT).
+    let wtUrl: String?
+    /// WebTransport TLS cert SHA-256 hash hex (nil if not available).
+    let wtCertHash: String?
 }
 
 /// An incoming signaling signal from a remote peer.
@@ -177,6 +201,8 @@ final class SignalingManager {
     private(set) var peerCode: String
     /// Incoming connection request from a remote peer (set by poll, consumed by UI).
     var incomingConnectionRequest: IncomingSignal? = nil
+    /// Set true when remote peer declines connection (consumed by ContentView to clear connecting state).
+    var connectionDeclined: Bool = false
 
     private var handle: OpaquePointer?
     private var pollTimer: Timer?
@@ -188,19 +214,48 @@ final class SignalingManager {
     }
 
     /// Start signaling with local + optional cloud server.
-    func start(localUrl: String, cloudUrl: String?) {
+    /// `wtUrl` and `wtCertHash` are optional WebTransport metadata from the daemon.
+    func start(localUrl: String, cloudUrl: String?, wtUrl: String? = nil, wtCertHash: String? = nil) {
         guard handle == nil else { return }
+
+        // Helper: call FFI with properly-scoped C string pointers.
+        // All withCString closures must be nested so pointers remain valid.
+        func callStart(
+            _ localCStr: UnsafePointer<CChar>,
+            _ cloudCStr: UnsafePointer<CChar>?,
+            _ codeCStr: UnsafePointer<CChar>,
+            _ nameCStr: UnsafePointer<CChar>,
+            _ wtUrlCStr: UnsafePointer<CChar>?,
+            _ wtHashCStr: UnsafePointer<CChar>?
+        ) -> OpaquePointer? {
+            bolt_signaling_start(localCStr, cloudCStr, codeCStr, nameCStr, wtUrlCStr, wtHashCStr)
+        }
 
         handle = peerCode.withCString { codeCStr in
             localUrl.withCString { localCStr in
                 let deviceName = Host.current().localizedName ?? "Mac"
                 return deviceName.withCString { nameCStr in
-                    if let cloud = cloudUrl {
-                        return cloud.withCString { cloudCStr in
-                            bolt_signaling_start(localCStr, cloudCStr, codeCStr, nameCStr)
+                    // Nest optional withCString calls to keep pointers alive
+                    if let cloud = cloudUrl, let wtu = wtUrl, let wth = wtCertHash {
+                        return cloud.withCString { cCloud in
+                            wtu.withCString { cWt in
+                                wth.withCString { cHash in
+                                    callStart(localCStr, cCloud, codeCStr, nameCStr, cWt, cHash)
+                                }
+                            }
+                        }
+                    } else if let cloud = cloudUrl, let wtu = wtUrl {
+                        return cloud.withCString { cCloud in
+                            wtu.withCString { cWt in
+                                callStart(localCStr, cCloud, codeCStr, nameCStr, cWt, nil)
+                            }
+                        }
+                    } else if let cloud = cloudUrl {
+                        return cloud.withCString { cCloud in
+                            callStart(localCStr, cCloud, codeCStr, nameCStr, nil, nil)
                         }
                     } else {
-                        return bolt_signaling_start(localCStr, nil, codeCStr, nameCStr)
+                        return callStart(localCStr, nil, codeCStr, nameCStr, nil, nil)
                     }
                 }
             }
@@ -274,8 +329,13 @@ final class SignalingManager {
                 let code = peer.peer_code.map { String(cString: $0) } ?? ""
                 let name = peer.device_name.map { String(cString: $0) } ?? ""
                 let type = peer.device_type.map { String(cString: $0) } ?? ""
+                let rawWtUrl = peer.wt_url
+                let rawWtHash = peer.wt_cert_hash
+                let wtUrl: String? = (rawWtUrl != nil) ? String(cString: rawWtUrl!) : nil
+                let wtHash: String? = (rawWtHash != nil) ? String(cString: rawWtHash!) : nil
                 updated.append(DiscoveredPeer(
-                    id: code, peerCode: code, deviceName: name, deviceType: type
+                    id: code, peerCode: code, deviceName: name, deviceType: type,
+                    wtUrl: wtUrl, wtCertHash: wtHash
                 ))
                 bolt_peer_free(peerPtr)
             }
@@ -301,7 +361,7 @@ struct PairingRequest: Identifiable {
     let sas: String
 }
 
-/// Session trust state.
+/// Session trust state (canonical v1: unverified, verified, legacy).
 enum TrustState: Equatable {
     case unverified(sas: String)
     case verified
@@ -316,15 +376,21 @@ struct PeerSession {
     var trust: TrustState
 }
 
-/// Session lifecycle phase.
+/// Canonical session phases (v1 contract: SESSION_CONTRACT.md).
+/// `disconnected` is native presentation-only — not part of canonical contract.
 enum SessionPhase: Equatable {
+    // Canonical v1 phases
     case idle
-    case pairingPending
+    case requesting
+    case incomingRequest
+    case connecting
     case connected
+    // Presentation-only (native): session ended, reason available for UI display.
+    // Dismissed back to idle via resetSession().
     case disconnected(reason: String)
 }
 
-/// Transfer lifecycle phase.
+/// Transfer lifecycle phase (canonical v1 contract).
 enum TransferPhase: Equatable {
     case idle
     case sending(fileName: String, transferId: String, progress: Float)
@@ -333,21 +399,44 @@ enum TransferPhase: Equatable {
     case failed(fileName: String, reason: String)
 }
 
+// ── Transfer Gating Policy (canonical P1) ──────────────────
+
+/// Returns true if file transfer is allowed (canonical policy P1).
+/// Transfer is gated by: connected AND (verified OR legacy).
+func isTransferAllowed(sessionPhase: SessionPhase, trust: TrustState) -> Bool {
+    guard sessionPhase == .connected else { return false }
+    switch trust {
+    case .verified, .legacy: return true
+    case .unverified: return false
+    }
+}
+
+// ── Session Manager (canonical state owner) ────────────────
+
 /// Manages IPC connection to the daemon for event forwarding and decisions.
+/// Owns the canonical session/transfer/verification state (v1 contract).
 @Observable
 final class IpcManager {
     private(set) var isConnected = false
     var pendingRequest: PairingRequest?
     private(set) var sessionPhase: SessionPhase = .idle
-    private(set) var connectedPeer: PeerSession?
+    var connectedPeer: PeerSession?
     private(set) var connectedPeerCount: UInt32 = 0
     var transferPhase: TransferPhase = .idle
+
+    /// Generation counter (INV-4). Increments on every canonical reset.
+    /// Used to reject stale async callbacks (INV-5).
+    private(set) var generation: UInt64 = 0
+
+    /// Peer info stashed on accept, applied when daemon confirms session.
+    var pendingAcceptPeer: PeerSession?
+    /// Peer info stashed by initiator for name resolution on session.connected.
+    var pendingInitiatorPeer: DiscoveredPeer?
 
     private var handle: OpaquePointer?
     private var pollTimer: Timer?
 
     /// Connect to daemon IPC socket with retry.
-    /// Retries up to 5 times with 500ms delay to handle daemon startup race.
     func start(socketPath: String, appVersion: String = "0.0.1") {
         guard handle == nil else { return }
         startWithRetry(socketPath: socketPath, appVersion: appVersion, attempt: 1)
@@ -391,12 +480,72 @@ final class IpcManager {
         }
 
         isConnected = false
-        pendingRequest = nil
+        resetSession()
+    }
+
+    // ── Canonical session phase transitions ──────────────────
+
+    /// Transition: idle → requesting (user selects peer).
+    func beginRequest(peer: DiscoveredPeer) -> Bool {
+        guard sessionPhase == .idle else { return false }
+        sessionPhase = .requesting
+        pendingInitiatorPeer = peer
+        return true
+    }
+
+    /// Transition: idle → incomingRequest (signal received from remote).
+    func receiveRequest() -> Bool {
+        guard sessionPhase == .idle else { return false }
+        sessionPhase = .incomingRequest
+        return true
+    }
+
+    /// Transition: requesting|incomingRequest → connecting (accepted).
+    func beginConnecting() -> Bool {
+        guard sessionPhase == .requesting || sessionPhase == .incomingRequest else { return false }
+        sessionPhase = .connecting
+        return true
+    }
+
+    /// Transition: connecting → connected (handshake complete).
+    /// Called by daemon session.connected IPC event.
+    func markConnected() -> Bool {
+        guard sessionPhase == .connecting else { return false }
+        sessionPhase = .connected
+        return true
+    }
+
+    /// Canonical reset: any → idle (v1 contract P3).
+    /// Clears all session, transfer, and verification state atomically.
+    /// Increments generation counter (INV-4).
+    @discardableResult
+    func resetSession() -> UInt64 {
+        generation += 1
         sessionPhase = .idle
         connectedPeer = nil
         connectedPeerCount = 0
         transferPhase = .idle
+        pendingRequest = nil
+        pendingAcceptPeer = nil
+        pendingInitiatorPeer = nil
+        return generation
     }
+
+    /// Presentation-only disconnect: connected → disconnected(reason).
+    /// Then user dismisses to idle via resetSession().
+    /// Caller must also call daemon.requestDisconnect() to close WS.
+    func disconnectSession(reason: String) {
+        sessionPhase = .disconnected(reason: reason)
+        connectedPeer = nil
+        transferPhase = .idle
+    }
+
+    /// Check if a generation is still current (INV-5).
+    func isCurrentGeneration(_ gen: UInt64) -> Bool {
+        return gen == generation
+    }
+
+    // ── Decisions ────────────────────────────────────────────
 
     /// Send a pairing decision back to the daemon.
     func sendPairingDecision(requestId: String, accept: Bool) {
@@ -414,15 +563,12 @@ final class IpcManager {
         }
 
         if accept, let req = pendingRequest {
-            // Transition to connected. If SAS was present, start as unverified.
-            let trust: TrustState = req.sas.isEmpty ? .legacy : .unverified(sas: req.sas)
-            connectedPeer = PeerSession(
+            pendingAcceptPeer = PeerSession(
                 peerCode: req.requestId,
                 deviceName: req.deviceName,
                 deviceType: req.deviceType,
-                trust: trust
+                trust: req.sas.isEmpty ? .legacy : .unverified(sas: req.sas)
             )
-            sessionPhase = .connected
         }
 
         pendingRequest = nil
@@ -438,45 +584,32 @@ final class IpcManager {
         transferPhase = .idle
     }
 
-    /// Reset session phase to idle (dismiss disconnected notice).
-    func resetSession() {
-        sessionPhase = .idle
-        connectedPeer = nil
+    /// Dismiss disconnected notice (presentation-only → canonical idle).
+    func dismissDisconnect() {
+        guard case .disconnected = sessionPhase else { return }
+        resetSession()
     }
 
-    /// Disconnect the current session.
-    func disconnectSession() {
-        guard let h = handle else { return }
-
-        let payload = """
-        {"reason":"user_initiated"}
-        """
-        payload.withCString { payloadCStr in
-            "session.disconnect".withCString { typeCStr in
-                let _ = bolt_ipc_send_decision(h, typeCStr, payloadCStr)
-            }
-        }
-
-        sessionPhase = .disconnected(reason: "user initiated")
-        connectedPeer = nil
-    }
+    // ── IPC Event Polling ────────────────────────────────────
 
     private func poll() {
         guard let h = handle else { return }
 
-        // Check connection
         let connected = bolt_ipc_is_connected(h) == 1
         if connected != isConnected {
             isConnected = connected
         }
 
-        // Drain events
         guard let ptr = bolt_ipc_drain_events(h) else { return }
         let raw = String(cString: ptr)
         bolt_free_string(ptr)
 
-        // Parse newline-separated JSON events
+        let gen = generation // capture for stale check
+
         for line in raw.split(separator: "\n") {
+            // Reject events from a stale generation
+            guard isCurrentGeneration(gen) else { break }
+
             guard let data = line.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let event = json["event"] as? String
@@ -494,22 +627,35 @@ final class IpcManager {
                     sas: payload["sas"] as? String ?? ""
                 )
                 pendingRequest = req
-                sessionPhase = .pairingPending
 
             case "daemon://status-update":
                 connectedPeerCount = UInt32(payload["connected_peers"] as? Int ?? 0)
-                // If daemon reports 0 peers and we think we're connected, session ended
                 if connectedPeerCount == 0 && sessionPhase == .connected {
-                    sessionPhase = .disconnected(reason: "peer disconnected")
-                    connectedPeer = nil
+                    disconnectSession(reason: "peer disconnected")
                 }
 
             case "daemon://session-connected":
-                // Future: daemon emits when WebRTC session established
-                sessionPhase = .connected
-                // Update peer info if available in payload
-                if let peerCode = payload["remote_peer_id"] as? String {
-                    if connectedPeer == nil {
+                // Transition through connecting → connected.
+                // If we're in requesting or incomingRequest, advance to connecting first.
+                if sessionPhase == .requesting || sessionPhase == .incomingRequest {
+                    _ = beginConnecting()
+                }
+                if markConnected() {
+                    // Resolve peer info: acceptor has pendingAcceptPeer,
+                    // initiator has pendingInitiatorPeer.
+                    if let pending = pendingAcceptPeer {
+                        connectedPeer = pending
+                        pendingAcceptPeer = nil
+                    } else if let target = pendingInitiatorPeer {
+                        let remotePk = payload["remote_peer_id"] as? String ?? target.peerCode
+                        connectedPeer = PeerSession(
+                            peerCode: remotePk,
+                            deviceName: target.deviceName,
+                            deviceType: target.deviceType,
+                            trust: .legacy
+                        )
+                        pendingInitiatorPeer = nil
+                    } else if let peerCode = payload["remote_peer_id"] as? String {
                         connectedPeer = PeerSession(
                             peerCode: peerCode,
                             deviceName: "Peer",
@@ -520,20 +666,17 @@ final class IpcManager {
                 }
 
             case "daemon://session-sas":
-                // Future: daemon emits SAS for verification
                 if let sas = payload["sas"] as? String {
                     connectedPeer?.trust = .unverified(sas: sas)
                 }
 
             case "daemon://session-ended":
                 let reason = payload["reason"] as? String ?? "unknown"
-                sessionPhase = .disconnected(reason: reason)
-                connectedPeer = nil
+                disconnectSession(reason: reason)
 
             case "daemon://session-error":
                 let reason = payload["reason"] as? String ?? "unknown"
-                sessionPhase = .disconnected(reason: reason)
-                connectedPeer = nil
+                disconnectSession(reason: reason)
 
             case "daemon://transfer-started":
                 let fileName = payload["file_name"] as? String ?? "file"
@@ -548,7 +691,6 @@ final class IpcManager {
             case "daemon://transfer-progress":
                 let progress = (payload["progress"] as? NSNumber)?.floatValue ?? 0
                 let transferId = payload["transfer_id"] as? String ?? ""
-                // Update progress on the current phase without changing the phase type
                 switch transferPhase {
                 case .sending(let fn, _, _):
                     transferPhase = .sending(fileName: fn, transferId: transferId, progress: progress)
@@ -569,13 +711,11 @@ final class IpcManager {
                 transferPhase = .failed(fileName: fileName, reason: reason)
 
             case "daemon://transfer-request":
-                // Incoming file transfer request — handled through pairing flow for now
                 break
 
             case "daemon://bridge-disconnected":
                 isConnected = false
-                sessionPhase = .disconnected(reason: "bridge lost")
-                connectedPeer = nil
+                disconnectSession(reason: "bridge lost")
                 stop()
 
             default:
