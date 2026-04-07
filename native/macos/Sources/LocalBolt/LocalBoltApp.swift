@@ -125,7 +125,7 @@ struct LocalBoltApp: App {
                     wtCertHash: self.daemon.wtCertHash
                 )
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    self.ipc.start(socketPath: self.daemon.socketPath)
+                    self.ipc.start(socketPath: self.daemon.socketPath, dataDir: self.daemon.dataDir)
                 }
             }
         }
@@ -547,7 +547,8 @@ struct ContentView: View {
                         peerCode: request.from,
                         deviceName: deviceName,
                         deviceType: deviceType,
-                        trust: .legacy
+                        trust: .legacy,
+                        identityKeyB64: nil // resolved on session-connected
                     )
                     _ = ipc.beginConnecting()
                 }) {

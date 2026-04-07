@@ -374,6 +374,67 @@ struct PeerSession {
     let deviceName: String
     let deviceType: String
     var trust: TrustState
+    /// Remote identity public key (base64). Used for TOFU pin persistence.
+    var identityKeyB64: String?
+}
+
+// ── TOFU Pin Store (persistent identity verification) ─────
+
+/// Persists verified peer identity keys to disk (JSON).
+/// Implements PROTOCOL.md §2: "Known key match: proceed without user interaction."
+final class PinStore {
+    private let fileURL: URL
+    private var pins: [String: PinEntry] = [:]
+
+    struct PinEntry: Codable {
+        var verified: Bool
+        var firstSeen: Date
+    }
+
+    init(dataDir: String) {
+        let dir = URL(fileURLWithPath: dataDir).appendingPathComponent("pins")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        fileURL = dir.appendingPathComponent("identity_pins.json")
+        load()
+    }
+
+    /// Check if an identity key is already pinned and verified.
+    func isVerified(identityKeyB64: String) -> Bool {
+        pins[identityKeyB64]?.verified == true
+    }
+
+    /// Pin an identity key (unverified). No-op if already pinned.
+    func pin(identityKeyB64: String) {
+        guard pins[identityKeyB64] == nil else { return }
+        pins[identityKeyB64] = PinEntry(verified: false, firstSeen: Date())
+        save()
+    }
+
+    /// Mark an already-pinned identity key as verified.
+    func markVerified(identityKeyB64: String) {
+        guard pins[identityKeyB64] != nil else {
+            pins[identityKeyB64] = PinEntry(verified: true, firstSeen: Date())
+            save()
+            return
+        }
+        pins[identityKeyB64]?.verified = true
+        save()
+    }
+
+    private func load() {
+        guard let data = try? Data(contentsOf: fileURL),
+              let decoded = try? JSONDecoder().decode([String: PinEntry].self, from: data)
+        else { return }
+        pins = decoded
+    }
+
+    private func save() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(pins) else { return }
+        try? data.write(to: fileURL, options: .atomic)
+    }
 }
 
 /// Canonical session phases (v1 contract: SESSION_CONTRACT.md).
@@ -433,11 +494,19 @@ final class IpcManager {
     /// Peer info stashed by initiator for name resolution on session.connected.
     var pendingInitiatorPeer: DiscoveredPeer?
 
+    /// TOFU pin store for persistent identity verification.
+    private(set) var pinStore: PinStore?
+
     private var handle: OpaquePointer?
     private var pollTimer: Timer?
 
     /// Connect to daemon IPC socket with retry.
-    func start(socketPath: String, appVersion: String = "0.0.1") {
+    /// - Parameters:
+    ///   - dataDir: Daemon data directory for pin store persistence.
+    func start(socketPath: String, appVersion: String = "0.0.1", dataDir: String? = nil) {
+        if let dir = dataDir, pinStore == nil {
+            pinStore = PinStore(dataDir: dir)
+        }
         guard handle == nil else { return }
         startWithRetry(socketPath: socketPath, appVersion: appVersion, attempt: 1)
     }
@@ -567,7 +636,8 @@ final class IpcManager {
                 peerCode: req.requestId,
                 deviceName: req.deviceName,
                 deviceType: req.deviceType,
-                trust: req.sas.isEmpty ? .legacy : .unverified(sas: req.sas)
+                trust: req.sas.isEmpty ? .legacy : .unverified(sas: req.sas),
+                identityKeyB64: nil // resolved on session-connected
             )
         }
 
@@ -575,8 +645,13 @@ final class IpcManager {
     }
 
     /// Mark the current session as verified (user confirmed SAS match).
+    /// Persists to TOFU pin store so future reconnects skip SAS.
     func markVerified() {
         connectedPeer?.trust = .verified
+        if let key = connectedPeer?.identityKeyB64 {
+            pinStore?.markVerified(identityKeyB64: key)
+            print("[TOFU] identity pinned as verified: \(key.prefix(8))...")
+        }
     }
 
     /// Clear transfer state back to idle.
@@ -640,34 +715,53 @@ final class IpcManager {
                 if sessionPhase == .requesting || sessionPhase == .incomingRequest {
                     _ = beginConnecting()
                 }
+                let remoteIdentityKey = payload["remote_peer_id"] as? String
                 if markConnected() {
                     // Resolve peer info: acceptor has pendingAcceptPeer,
                     // initiator has pendingInitiatorPeer.
                     if let pending = pendingAcceptPeer {
-                        connectedPeer = pending
+                        var peer = pending
+                        peer.identityKeyB64 = remoteIdentityKey
+                        connectedPeer = peer
                         pendingAcceptPeer = nil
                     } else if let target = pendingInitiatorPeer {
-                        let remotePk = payload["remote_peer_id"] as? String ?? target.peerCode
+                        let remotePk = remoteIdentityKey ?? target.peerCode
                         connectedPeer = PeerSession(
                             peerCode: remotePk,
                             deviceName: target.deviceName,
                             deviceType: target.deviceType,
-                            trust: .legacy
+                            trust: .legacy,
+                            identityKeyB64: remoteIdentityKey
                         )
                         pendingInitiatorPeer = nil
-                    } else if let peerCode = payload["remote_peer_id"] as? String {
+                    } else if let peerCode = remoteIdentityKey {
                         connectedPeer = PeerSession(
                             peerCode: peerCode,
                             deviceName: "Peer",
                             deviceType: "desktop",
-                            trust: .legacy
+                            trust: .legacy,
+                            identityKeyB64: remoteIdentityKey
                         )
                     }
                 }
 
             case "daemon://session-sas":
                 if let sas = payload["sas"] as? String {
-                    connectedPeer?.trust = .unverified(sas: sas)
+                    let identityKey = payload["remote_identity_pk_b64"] as? String
+                        ?? connectedPeer?.identityKeyB64
+                    // TOFU: check pin store for previously verified identity
+                    if let key = identityKey, pinStore?.isVerified(identityKeyB64: key) == true {
+                        // Known verified peer — skip SAS (PROTOCOL.md §2)
+                        connectedPeer?.trust = .verified
+                        print("[TOFU] known verified identity — SAS skipped")
+                    } else {
+                        connectedPeer?.trust = .unverified(sas: sas)
+                        // Pin the identity key (unverified) for future reference
+                        if let key = identityKey {
+                            connectedPeer?.identityKeyB64 = key
+                            pinStore?.pin(identityKeyB64: key)
+                        }
+                    }
                 }
 
             case "daemon://session-ended":
