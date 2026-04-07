@@ -4,6 +4,35 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v1.2.27-tofu-pin-store — 2026-04-07
+
+**Commit:** e93a7cc
+
+fix: TOFU pin store for native reconnect identity persistence.
+
+Adds persistent TOFU (Trust On First Use) pin store to the macOS native shell.
+Previously, SAS verification state was lost across reconnects — the acceptor
+saw SAS while the initiator auto-skipped, creating an asymmetric trust UX.
+The new `PinStore` class persists verified peer identity keys to
+`<dataDir>/pins/identity_pins.json` (JSON, atomic writes, ISO 8601 dates).
+
+On `daemon://session-sas`, the IPC manager checks the pin store: if the
+remote identity key is already verified, SAS is skipped (PROTOCOL.md §2).
+New identities are pinned as unverified on first encounter, then promoted
+to verified when the user confirms the SAS match via `markVerified()`.
+
+`PeerSession` now carries `identityKeyB64` (optional), populated from
+`remote_peer_id` in the `session.connected` payload. `IpcManager.start()`
+accepts an optional `dataDir` parameter to initialize the pin store.
+
+Workstream: RECONNECT-INTEGRITY-1.
+
+**Files changed:**
+- native/macos/Sources/LocalBolt/BoltBridge.swift
+- native/macos/Sources/LocalBolt/LocalBoltApp.swift
+
+---
+
 ## localbolt-app-v1.2.24-consumer-btr1-p3 — 2026-03-12
 
 **Commit:** ff33747

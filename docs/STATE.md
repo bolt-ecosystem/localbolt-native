@@ -7,8 +7,8 @@
 
 ## Latest Release
 
-- **Tag (pushed):** localbolt-app-v1.2.26-br5-wasm-init
-- **HEAD:** e0437c9 (3 commits ahead of last pushed tag — governance reconciliation)
+- **Tag (pushed):** localbolt-app-v1.2.27-tofu-pin-store
+- **HEAD:** e93a7cc
 - **Date:** 2026-04-07
 - **Tests:** 82 Rust (native/shared) + contract parity tests
 
@@ -77,15 +77,24 @@
 - **native/macos:** macOS SwiftUI shell — forward native product path. Full transfer vertical: discovery, connect, pair, verify (with SAS reject), send/receive with progress, .app bundle with daemon sidecar. Safety controls M1-M3 implemented. NATIVE-SHELL-1, NATIVE-SHELL-UX-1, NATIVE-UX-SAFETY-CONTROLS-1 (partial) CLOSED.
 - **bolt-ui (egui):** Historical desktop shell in bolt-core-sdk. Superseded by native shells for forward development.
 
+## TOFU Pin Persistence (v1.2.27)
+
+- **PinStore** class in `BoltBridge.swift` — persists verified identity keys to `<dataDir>/pins/identity_pins.json`
+- JSON format, atomic writes, ISO 8601 date encoding, sorted keys
+- Pin lifecycle: new identity pinned as unverified on first SAS encounter, promoted to verified on user confirmation
+- On reconnect: known verified identities skip SAS automatically (PROTOCOL.md §2)
+- `IpcManager.start()` accepts `dataDir` to initialize pin store; `PeerSession.identityKeyB64` carries remote identity key
+- Log tokens: `[TOFU] identity pinned as verified`, `[TOFU] known verified identity — SAS skipped`
+
 ## Recent Streams (since v1.2.26)
 
 | Stream | Status | Commits |
 |--------|--------|---------|
+| RECONNECT-INTEGRITY-1 (TOFU pin store) | DONE | `e93a7cc` |
 | NATIVE-SHELL-1 closure (Tauri retirement) | DONE | `14094ed` |
 | SIGNALING-FFI-CRASH-FIX-1 | DONE | `219aedd` |
 | NATIVE-UX-SAFETY-CONTROLS-1 (M1-M3) | DONE | `e0437c9` |
 
 ## Known Open Issues
 
-- **RECONNECT-INTEGRITY-1** — Trust state leakage across sessions. SAS verification asymmetric on reconnect. Safety-critical.
 - **NATIVE-UX-PARITY-IMPL-2** — 4 remaining MUST-MATCH items (M4-M7).
