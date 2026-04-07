@@ -361,11 +361,13 @@ struct PairingRequest: Identifiable {
     let sas: String
 }
 
-/// Session trust state (canonical v1: unverified, verified, legacy).
+/// Session trust state (canonical v1: unverified, verified, legacy + M7 mismatch).
 enum TrustState: Equatable {
     case unverified(sas: String)
     case verified
     case legacy // peer lacks identity support
+    /// M7: TOFU identity mismatch — device name seen before with different key.
+    case mismatch(deviceName: String, oldKeyPrefix: String)
 }
 
 /// Connected peer session info.
@@ -389,6 +391,7 @@ final class PinStore {
     struct PinEntry: Codable {
         var verified: Bool
         var firstSeen: Date
+        var deviceName: String?
     }
 
     init(dataDir: String) {
@@ -404,21 +407,31 @@ final class PinStore {
     }
 
     /// Pin an identity key (unverified). No-op if already pinned.
-    func pin(identityKeyB64: String) {
+    func pin(identityKeyB64: String, deviceName: String? = nil) {
         guard pins[identityKeyB64] == nil else { return }
-        pins[identityKeyB64] = PinEntry(verified: false, firstSeen: Date())
+        pins[identityKeyB64] = PinEntry(verified: false, firstSeen: Date(), deviceName: deviceName)
         save()
     }
 
     /// Mark an already-pinned identity key as verified.
-    func markVerified(identityKeyB64: String) {
-        guard pins[identityKeyB64] != nil else {
-            pins[identityKeyB64] = PinEntry(verified: true, firstSeen: Date())
-            save()
-            return
+    func markVerified(identityKeyB64: String, deviceName: String? = nil) {
+        if var entry = pins[identityKeyB64] {
+            entry.verified = true
+            if let name = deviceName { entry.deviceName = name }
+            pins[identityKeyB64] = entry
+        } else {
+            pins[identityKeyB64] = PinEntry(verified: true, firstSeen: Date(), deviceName: deviceName)
         }
-        pins[identityKeyB64]?.verified = true
         save()
+    }
+
+    /// M7: Check if a device name was previously verified with a different identity key.
+    /// Returns the old identity key (truncated) if mismatch detected, nil otherwise.
+    func checkMismatch(identityKeyB64: String, deviceName: String) -> String? {
+        for (key, entry) in pins where entry.verified && entry.deviceName == deviceName && key != identityKeyB64 {
+            return String(key.prefix(12)) + "..."
+        }
+        return nil
     }
 
     private func load() {
@@ -468,7 +481,7 @@ func isTransferAllowed(sessionPhase: SessionPhase, trust: TrustState) -> Bool {
     guard sessionPhase == .connected else { return false }
     switch trust {
     case .verified, .legacy: return true
-    case .unverified: return false
+    case .unverified, .mismatch: return false
     }
 }
 
@@ -649,7 +662,7 @@ final class IpcManager {
     func markVerified() {
         connectedPeer?.trust = .verified
         if let key = connectedPeer?.identityKeyB64 {
-            pinStore?.markVerified(identityKeyB64: key)
+            pinStore?.markVerified(identityKeyB64: key, deviceName: connectedPeer?.deviceName)
             print("[TOFU] identity pinned as verified: \(key.prefix(8))...")
         }
     }
@@ -749,8 +762,16 @@ final class IpcManager {
                 if let sas = payload["sas"] as? String {
                     let identityKey = payload["remote_identity_pk_b64"] as? String
                         ?? connectedPeer?.identityKeyB64
+                    let peerName = connectedPeer?.deviceName
+                    // M7: Check for TOFU identity mismatch before anything else
+                    if let key = identityKey, let name = peerName,
+                       let oldKey = pinStore?.checkMismatch(identityKeyB64: key, deviceName: name) {
+                        connectedPeer?.trust = .mismatch(deviceName: name, oldKeyPrefix: oldKey)
+                        connectedPeer?.identityKeyB64 = key
+                        print("[TOFU] IDENTITY MISMATCH for \(name) — old key: \(oldKey)")
+                    }
                     // TOFU: check pin store for previously verified identity
-                    if let key = identityKey, pinStore?.isVerified(identityKeyB64: key) == true {
+                    else if let key = identityKey, pinStore?.isVerified(identityKeyB64: key) == true {
                         // Known verified peer — skip SAS (PROTOCOL.md §2)
                         connectedPeer?.trust = .verified
                         print("[TOFU] known verified identity — SAS skipped")
@@ -759,7 +780,7 @@ final class IpcManager {
                         // Pin the identity key (unverified) for future reference
                         if let key = identityKey {
                             connectedPeer?.identityKeyB64 = key
-                            pinStore?.pin(identityKeyB64: key)
+                            pinStore?.pin(identityKeyB64: key, deviceName: peerName)
                         }
                     }
                 }

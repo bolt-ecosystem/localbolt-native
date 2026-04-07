@@ -148,6 +148,10 @@ struct ContentView: View {
     @State private var declinedNotice: String? = nil
     /// Transient notice shown after SAS rejection (M3).
     @State private var rejectionNotice: String? = nil
+    /// M4/M5: File queue — selected files awaiting explicit send.
+    @State private var fileQueue: [URL] = []
+    /// M7: TOFU identity mismatch alert text.
+    @State private var mismatchAlert: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -591,6 +595,43 @@ struct ContentView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
 
+            // M7: TOFU identity mismatch — security alert (blocks transfer)
+            if case .mismatch(let name, let oldKey) = peer.trust {
+                Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                VStack(spacing: 10) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.red)
+                        Text("Security Warning")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.red)
+                    }
+                    Text("The identity key for \"\(name)\" has changed since it was last verified.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                    Text("Previous key: \(oldKey)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.3))
+                    Text("This may indicate a security threat. Do not proceed unless you expect this change.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.red.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                    Button(action: {
+                        daemon.requestDisconnect()
+                        ipc.disconnectSession(reason: "identity mismatch")
+                    }) {
+                        Text("Disconnect")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .controlSize(.regular)
+                }
+                .padding(16)
+            }
+
             // SAS verification prompt (blocks transfer per P1)
             if case .unverified(let sas) = peer.trust {
                 Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
@@ -669,6 +710,15 @@ struct ContentView: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.white.opacity(0.25))
             }
+        case .mismatch:
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundColor(.red)
+                Text("Identity Mismatch")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.red)
+            }
         }
     }
 
@@ -678,31 +728,37 @@ struct ContentView: View {
         Group {
             switch ipc.transferPhase {
             case .idle:
-                VStack(spacing: 12) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 24))
-                        .foregroundColor(.white.opacity(isDragOver ? 0.6 : 0.3))
-                    Text("Drop files here")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
-                    Text("or click to select")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.3))
-                    Button("Select Files") { pickAndSendFile() }
-                        .buttonStyle(.bordered)
-                        .tint(.white.opacity(0.5))
-                        .controlSize(.small)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                        .foregroundColor(.white.opacity(isDragOver ? 0.2 : 0.08))
-                )
-                .padding(16)
-                .onDrop(of: [.fileURL], isTargeted: $isDragOver) { providers in
-                    handleDrop(providers)
+                if fileQueue.isEmpty {
+                    // M4: Drop zone — files go to queue, not auto-sent
+                    VStack(spacing: 12) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 24))
+                            .foregroundColor(.white.opacity(isDragOver ? 0.6 : 0.3))
+                        Text("Drop files here")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                        Text("or click to select files")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.3))
+                        Button("Select Files") { pickFiles() }
+                            .buttonStyle(.bordered)
+                            .tint(.white.opacity(0.5))
+                            .controlSize(.small)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                            .foregroundColor(.white.opacity(isDragOver ? 0.2 : 0.08))
+                    )
+                    .padding(16)
+                    .onDrop(of: [.fileURL], isTargeted: $isDragOver) { providers in
+                        handleDrop(providers)
+                    }
+                } else {
+                    // M4/M5: File queue — review before sending
+                    fileQueueView
                 }
 
             case .sending(let fileName, _, let progress):
@@ -712,21 +768,29 @@ struct ContentView: View {
                 transferProgress(icon: "arrow.down.circle", label: "Receiving", fileName: fileName, progress: progress, color: .blue)
 
             case .complete(let fileName, let savePath):
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(neon)
-                    Text(fileName)
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.7))
-                    Spacer()
-                    if let path = savePath {
-                        Button("Reveal") { NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "") }
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(neon)
+                        Text(fileName)
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.7))
+                        Spacer()
+                        if let path = savePath {
+                            Button("Reveal") { NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "") }
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
+                        }
+                        Button("Done") { sendNextOrClear() }
                             .buttonStyle(.bordered)
                             .controlSize(.mini)
                     }
-                    Button("Done") { ipc.clearTransfer() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.mini)
+                    // M5: Show remaining queue count
+                    if !fileQueue.isEmpty {
+                        Text("\(fileQueue.count) file\(fileQueue.count == 1 ? "" : "s") remaining")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.3))
+                    }
                 }
                 .padding(16)
 
@@ -738,12 +802,80 @@ struct ContentView: View {
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.4))
                     Spacer()
-                    Button("Dismiss") { ipc.clearTransfer() }
+                    Button("Dismiss") {
+                        fileQueue.removeAll()
+                        ipc.clearTransfer()
+                    }
                         .buttonStyle(.bordered)
                         .controlSize(.mini)
                 }
                 .padding(16)
             }
+        }
+    }
+
+    // M4/M5: File queue view — shows selected files with remove + explicit send
+    private var fileQueueView: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("\(fileQueue.count) file\(fileQueue.count == 1 ? "" : "s") selected")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.7))
+                Spacer()
+                Button(action: { pickFiles() }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+                .help("Add more files")
+            }
+
+            // File list with individual remove
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(Array(fileQueue.enumerated()), id: \.offset) { index, url in
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc")
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.3))
+                            Text(url.lastPathComponent)
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.6))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            // M5: Individual file remove
+                            Button(action: { fileQueue.remove(at: index) }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.white.opacity(0.3))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+            .frame(maxHeight: 100)
+
+            // M4: Explicit send + clear buttons
+            HStack(spacing: 8) {
+                Button("Clear") { fileQueue.removeAll() }
+                    .buttonStyle(.bordered)
+                    .tint(.white.opacity(0.4))
+                    .controlSize(.small)
+                Button("Send \(fileQueue.count) File\(fileQueue.count == 1 ? "" : "s")") {
+                    sendFirstFile()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(neon)
+                .controlSize(.small)
+            }
+        }
+        .padding(16)
+        .onDrop(of: [.fileURL], isTargeted: $isDragOver) { providers in
+            handleDrop(providers)
         }
     }
 
@@ -761,6 +893,18 @@ struct ContentView: View {
             }
             ProgressView(value: Double(progress))
                 .tint(color)
+            // M6: Cancel transfer button
+            HStack {
+                Spacer()
+                Button("Cancel Transfer") {
+                    fileQueue.removeAll()
+                    daemon.requestDisconnect()
+                    ipc.disconnectSession(reason: "transfer cancelled")
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundColor(.red.opacity(0.6))
+            }
         }
         .padding(16)
     }
@@ -817,30 +961,50 @@ struct ContentView: View {
 
     // MARK: - Helpers
 
-    func pickAndSendFile() {
+    // M4: File selection adds to queue — no auto-send.
+    // M5: Multi-file selection enabled.
+    func pickFiles() {
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        let ipcRef = ipc
-        let daemonRef = daemon
         panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            ipcRef.transferPhase = .sending(fileName: url.lastPathComponent, transferId: "pending", progress: 0)
-            daemonRef.sendFile(path: url.path)
+            guard response == .OK else { return }
+            let newUrls = panel.urls.filter { url in !self.fileQueue.contains(url) }
+            self.fileQueue.append(contentsOf: newUrls)
         }
     }
 
+    // M4/M5: Drop adds to queue, not auto-send.
     func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
-        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-            guard let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-            DispatchQueue.main.async {
-                ipc.transferPhase = .sending(fileName: url.lastPathComponent, transferId: "pending", progress: 0)
-                daemon.sendFile(path: url.path)
+        for provider in providers {
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                guard let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+                DispatchQueue.main.async {
+                    if !self.fileQueue.contains(url) {
+                        self.fileQueue.append(url)
+                    }
+                }
             }
         }
         return true
+    }
+
+    // M4: Explicit send — sends first file from queue.
+    func sendFirstFile() {
+        guard let url = fileQueue.first else { return }
+        fileQueue.removeFirst()
+        ipc.transferPhase = .sending(fileName: url.lastPathComponent, transferId: "pending", progress: 0)
+        daemon.sendFile(path: url.path)
+    }
+
+    // M5: After transfer complete, send next in queue or clear.
+    func sendNextOrClear() {
+        if !fileQueue.isEmpty {
+            sendFirstFile()
+        } else {
+            ipc.clearTransfer()
+        }
     }
 
     func deviceIcon(_ type: String) -> String {
