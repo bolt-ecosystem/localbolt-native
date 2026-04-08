@@ -471,6 +471,14 @@ enum TransferPhase: Equatable {
     case receiving(fileName: String, transferId: String, progress: Float)
     case complete(fileName: String, savePath: String?)
     case failed(fileName: String, reason: String)
+
+    /// S6: Whether an active transfer is in progress (for speed/ETA tracking).
+    var isActive: Bool {
+        switch self {
+        case .sending, .receiving: return true
+        default: return false
+        }
+    }
 }
 
 // ── Transfer Gating Policy (canonical P1) ──────────────────
@@ -497,6 +505,8 @@ final class IpcManager {
     var connectedPeer: PeerSession?
     private(set) var connectedPeerCount: UInt32 = 0
     var transferPhase: TransferPhase = .idle
+    /// S6: File size from transfer.started event (for speed/ETA display).
+    var transferFileSizeBytes: UInt64 = 0
 
     /// Generation counter (INV-4). Increments on every canonical reset.
     /// Used to reject stale async callbacks (INV-5).
@@ -607,6 +617,7 @@ final class IpcManager {
         connectedPeer = nil
         connectedPeerCount = 0
         transferPhase = .idle
+        transferFileSizeBytes = 0
         pendingRequest = nil
         pendingAcceptPeer = nil
         pendingInitiatorPeer = nil
@@ -670,6 +681,7 @@ final class IpcManager {
     /// Clear transfer state back to idle.
     func clearTransfer() {
         transferPhase = .idle
+        transferFileSizeBytes = 0
     }
 
     /// Dismiss disconnected notice (presentation-only → canonical idle).
@@ -797,6 +809,7 @@ final class IpcManager {
                 let fileName = payload["file_name"] as? String ?? "file"
                 let transferId = payload["transfer_id"] as? String ?? ""
                 let direction = payload["direction"] as? String ?? "send"
+                transferFileSizeBytes = (payload["file_size_bytes"] as? NSNumber)?.uint64Value ?? 0
                 if direction == "receive" {
                     transferPhase = .receiving(fileName: fileName, transferId: transferId, progress: 0)
                 } else {

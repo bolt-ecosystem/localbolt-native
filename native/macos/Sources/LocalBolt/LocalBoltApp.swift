@@ -152,6 +152,10 @@ struct ContentView: View {
     @State private var fileQueue: [URL] = []
     /// M7: TOFU identity mismatch alert text.
     @State private var mismatchAlert: String? = nil
+    /// S7: Disconnect confirmation dialog.
+    @State private var showDisconnectConfirm = false
+    /// S6: Transfer start time for speed/ETA calculation.
+    @State private var transferStartTime: Date? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -210,6 +214,14 @@ struct ContentView: View {
                 }
             }
         }
+        // S6: Track transfer start time for incoming receives
+        .onChange(of: ipc.transferPhase.isActive) {
+            if ipc.transferPhase.isActive && transferStartTime == nil {
+                transferStartTime = Date()
+            } else if !ipc.transferPhase.isActive {
+                transferStartTime = nil
+            }
+        }
     }
 
     // MARK: - Startup
@@ -238,16 +250,30 @@ struct ContentView: View {
 
     private var transferCard: some View {
         VStack(spacing: 0) {
-            // Encryption badge
-            HStack(spacing: 6) {
-                Image(systemName: ipc.sessionPhase == .connected ? "lock.shield.fill" : "lock.shield")
-                    .font(.system(size: 13))
-                    .foregroundColor(neon.opacity(0.7))
-                Text("End-to-End Encrypted")
-                    .font(.system(size: 13))
-                    .foregroundColor(neon.opacity(0.7))
+            // S4: E2E badge — prominent when connected, subtle otherwise
+            if ipc.sessionPhase == .connected {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.shield.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(neon.opacity(0.8))
+                    Text("End-to-End Encrypted")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(neon.opacity(0.8))
+                }
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity)
+                .background(neon.opacity(0.04))
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.shield")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.2))
+                    Text("End-to-End Encrypted")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.2))
+                }
+                .padding(.vertical, 14)
             }
-            .padding(.vertical, 14)
 
             Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
 
@@ -416,14 +442,10 @@ struct ContentView: View {
                     .font(.system(size: 14))
                     .foregroundColor(.white.opacity(0.4))
                     .frame(width: 20)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(peer.deviceName)
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.8))
-                    Text(peer.peerCode)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.25))
-                }
+                // S1: Device name only — peer code removed for cleaner discovery
+                Text(peer.deviceName)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.8))
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -471,10 +493,11 @@ struct ContentView: View {
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.3))
                 case .slow:
+                    // S2: Actionable slow-connection copy
                     Text("Still connecting to **\(target.deviceName)**...")
                         .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.8))
-                    Text("This is taking longer than usual")
+                    Text("Check that both devices are on the same network")
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.3))
                 }
@@ -513,9 +536,13 @@ struct ContentView: View {
                     Text(deviceName)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white.opacity(0.9))
+                    // S8: Subtext clarifies what accepting means
                     Text("wants to connect")
                         .font(.system(size: 12))
                         .foregroundColor(.white.opacity(0.4))
+                    Text("Accept to start sharing files")
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.25))
                 }
                 Spacer()
             }
@@ -581,16 +608,23 @@ struct ContentView: View {
                     trustLabel(peer: peer)
                 }
                 Spacer()
-                Button(action: {
-                    daemon.requestDisconnect()
-                    ipc.disconnectSession(reason: "user initiated")
-                }) {
+                // S7: Disconnect with confirmation dialog
+                Button(action: { showDisconnectConfirm = true }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.3))
                 }
                 .buttonStyle(.plain)
                 .help("Disconnect")
+                .alert("Disconnect?", isPresented: $showDisconnectConfirm) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Disconnect", role: .destructive) {
+                        daemon.requestDisconnect()
+                        ipc.disconnectSession(reason: "user initiated")
+                    }
+                } message: {
+                    Text("This will end the secure session with \(peer.deviceName).")
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -660,8 +694,9 @@ struct ContentView: View {
                         .tint(.red.opacity(0.8))
                         .controlSize(.regular)
 
+                        // S3: Label aligned with web — confirms user action, not code state
                         Button(action: { ipc.markVerified() }) {
-                            Text("Confirm Match")
+                            Text("I Verified")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -893,9 +928,15 @@ struct ContentView: View {
             }
             ProgressView(value: Double(progress))
                 .tint(color)
-            // M6: Cancel transfer button
+            // S6: Speed + ETA stats
             HStack {
+                if let stats = transferStats(progress: progress) {
+                    Text(stats)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.3))
+                }
                 Spacer()
+                // M6: Cancel transfer button
                 Button("Cancel Transfer") {
                     fileQueue.removeAll()
                     daemon.requestDisconnect()
@@ -907,6 +948,41 @@ struct ContentView: View {
             }
         }
         .padding(16)
+    }
+
+    /// S6: Calculate speed and ETA from transfer progress + elapsed time.
+    private func transferStats(progress: Float) -> String? {
+        guard let startTime = transferStartTime, progress > 0.01 else { return nil }
+        let elapsed = Date().timeIntervalSince(startTime)
+        guard elapsed > 0.5 else { return nil } // avoid jitter in first half-second
+
+        let totalBytes = ipc.transferFileSizeBytes
+        guard totalBytes > 0 else { return nil }
+
+        let bytesTransferred = Double(totalBytes) * Double(progress)
+        let bytesPerSecond = bytesTransferred / elapsed
+
+        let speedStr: String
+        if bytesPerSecond >= 1_048_576 {
+            speedStr = String(format: "%.1f MB/s", bytesPerSecond / 1_048_576)
+        } else if bytesPerSecond >= 1024 {
+            speedStr = String(format: "%.0f KB/s", bytesPerSecond / 1024)
+        } else {
+            speedStr = String(format: "%.0f B/s", bytesPerSecond)
+        }
+
+        let remaining = Double(1.0 - progress)
+        let etaSeconds = (remaining / Double(progress)) * elapsed
+        let etaStr: String
+        if etaSeconds < 60 {
+            etaStr = String(format: "%.0fs left", etaSeconds)
+        } else if etaSeconds < 3600 {
+            etaStr = String(format: "%.0fm %02.0fs left", floor(etaSeconds / 60), etaSeconds.truncatingRemainder(dividingBy: 60))
+        } else {
+            etaStr = String(format: "%.0fh %02.0fm left", floor(etaSeconds / 3600), floor(etaSeconds.truncatingRemainder(dividingBy: 3600) / 60))
+        }
+
+        return "\(speedStr)  ·  \(etaStr)"
     }
 
     // MARK: - Connection Management
@@ -994,6 +1070,7 @@ struct ContentView: View {
     func sendFirstFile() {
         guard let url = fileQueue.first else { return }
         fileQueue.removeFirst()
+        transferStartTime = Date() // S6: track start for speed/ETA
         ipc.transferPhase = .sending(fileName: url.lastPathComponent, transferId: "pending", progress: 0)
         daemon.sendFile(path: url.path)
     }
