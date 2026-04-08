@@ -143,6 +143,20 @@ final class DaemonManager {
         return bolt_daemon_disconnect_session(h) == 1
     }
 
+    /// Pause the active outbound transfer (DAEMON-TRANSFER-CONTROL-1).
+    @discardableResult
+    func pauseTransfer() -> Bool {
+        guard let h = handle else { return false }
+        return bolt_daemon_pause_transfer(h) == 1
+    }
+
+    /// Resume a paused outbound transfer (DAEMON-TRANSFER-CONTROL-1).
+    @discardableResult
+    func resumeTransfer() -> Bool {
+        guard let h = handle else { return false }
+        return bolt_daemon_resume_transfer(h) == 1
+    }
+
     /// Poll daemon state (called on timer).
     private func poll() {
         guard let h = handle else { return }
@@ -507,6 +521,8 @@ final class IpcManager {
     var transferPhase: TransferPhase = .idle
     /// S6: File size from transfer.started event (for speed/ETA display).
     var transferFileSizeBytes: UInt64 = 0
+    /// S5: Whether the current outbound transfer is paused (DAEMON-TRANSFER-CONTROL-1).
+    var transferPaused: Bool = false
 
     /// Generation counter (INV-4). Increments on every canonical reset.
     /// Used to reject stale async callbacks (INV-5).
@@ -618,6 +634,7 @@ final class IpcManager {
         connectedPeerCount = 0
         transferPhase = .idle
         transferFileSizeBytes = 0
+        transferPaused = false
         pendingRequest = nil
         pendingAcceptPeer = nil
         pendingInitiatorPeer = nil
@@ -682,6 +699,7 @@ final class IpcManager {
     func clearTransfer() {
         transferPhase = .idle
         transferFileSizeBytes = 0
+        transferPaused = false
     }
 
     /// Dismiss disconnected notice (presentation-only → canonical idle).
@@ -837,6 +855,12 @@ final class IpcManager {
                 let fileName = payload["file_name"] as? String ?? "file"
                 let reason = payload["reason"] as? String ?? "unknown"
                 transferPhase = .failed(fileName: fileName, reason: reason)
+
+            case "daemon://transfer-paused":
+                transferPaused = true
+
+            case "daemon://transfer-resumed":
+                transferPaused = false
 
             case "daemon://transfer-request":
                 break

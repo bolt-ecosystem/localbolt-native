@@ -936,6 +936,19 @@ struct ContentView: View {
                         .foregroundColor(.white.opacity(0.3))
                 }
                 Spacer()
+                // S5: Pause/Resume toggle (send only, DAEMON-TRANSFER-CONTROL-1)
+                if case .sending = ipc.transferPhase {
+                    Button(ipc.transferPaused ? "Resume" : "Pause") {
+                        if ipc.transferPaused {
+                            daemon.resumeTransfer()
+                        } else {
+                            daemon.pauseTransfer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.5))
+                }
                 // M6: Cancel transfer button
                 Button("Cancel Transfer") {
                     fileQueue.removeAll()

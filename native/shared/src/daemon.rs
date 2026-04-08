@@ -299,6 +299,54 @@ pub unsafe extern "C" fn bolt_daemon_connect_remote(
     }
 }
 
+/// Request the daemon to pause the active transfer (DAEMON-TRANSFER-CONTROL-1).
+/// Returns 1 on success, 0 on failure.
+///
+/// # Safety
+/// `handle` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_daemon_pause_transfer(
+    handle: *mut BoltDaemon,
+) -> i32 {
+    if handle.is_null() { return 0; }
+    let daemon = &*handle;
+    let signal_path = format!("{}/transfer_pause.signal", daemon.data_dir);
+    match std::fs::write(&signal_path, "pause") {
+        Ok(()) => {
+            eprintln!("[NATIVE_BRIDGE] wrote transfer_pause.signal");
+            1
+        }
+        Err(e) => {
+            eprintln!("[NATIVE_BRIDGE] failed to write transfer_pause.signal: {e}");
+            0
+        }
+    }
+}
+
+/// Request the daemon to resume the active transfer (DAEMON-TRANSFER-CONTROL-1).
+/// Returns 1 on success, 0 on failure.
+///
+/// # Safety
+/// `handle` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_daemon_resume_transfer(
+    handle: *mut BoltDaemon,
+) -> i32 {
+    if handle.is_null() { return 0; }
+    let daemon = &*handle;
+    let signal_path = format!("{}/transfer_resume.signal", daemon.data_dir);
+    match std::fs::write(&signal_path, "resume") {
+        Ok(()) => {
+            eprintln!("[NATIVE_BRIDGE] wrote transfer_resume.signal");
+            1
+        }
+        Err(e) => {
+            eprintln!("[NATIVE_BRIDGE] failed to write transfer_resume.signal: {e}");
+            0
+        }
+    }
+}
+
 /// Stop the daemon and free the handle.
 ///
 /// # Safety

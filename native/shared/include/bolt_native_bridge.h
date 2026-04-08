@@ -70,6 +70,14 @@ int bolt_daemon_send_file(BoltDaemon* handle, const char* file_path);
 /// Returns 1 on success, 0 on failure.
 int bolt_daemon_disconnect_session(BoltDaemon* handle);
 
+/// Pause the active transfer (DAEMON-TRANSFER-CONTROL-1).
+/// Returns 1 on success, 0 on failure.
+int bolt_daemon_pause_transfer(BoltDaemon* handle);
+
+/// Resume a paused transfer (DAEMON-TRANSFER-CONTROL-1).
+/// Returns 1 on success, 0 on failure.
+int bolt_daemon_resume_transfer(BoltDaemon* handle);
+
 /// Connect to a remote daemon's WS endpoint (NATIVE-CONNECT-1).
 /// ws_url: remote daemon wsUrl, e.g. "ws://192.168.4.36:9100".
 /// Returns 1 on success, 0 on failure.
