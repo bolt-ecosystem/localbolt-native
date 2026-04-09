@@ -222,6 +222,37 @@ struct ContentView: View {
                 transferStartTime = nil
             }
         }
+        // WT session detection: daemon stderr indicates session up, but IPC
+        // events are not emitted for WebTransport sessions. Advance the
+        // state machine here so the UI reflects the connected session.
+        .onChange(of: daemon.wtSessionActive) {
+            if daemon.wtSessionActive && ipc.sessionPhase == .connecting {
+                _ = ipc.markConnected()
+                if let pending = ipc.pendingAcceptPeer {
+                    ipc.connectedPeer = pending
+                    ipc.pendingAcceptPeer = nil
+                }
+                print("[WT-DETECT] Advanced to .connected from daemon stderr")
+            }
+            if !daemon.wtSessionActive && ipc.sessionPhase == .connected {
+                ipc.disconnectSession(reason: "WT session ended")
+                print("[WT-DETECT] WT session ended — disconnected")
+            }
+        }
+        // WT SAS: apply verification state from daemon stderr
+        .onChange(of: daemon.wtSessionSAS) {
+            if let sas = daemon.wtSessionSAS, ipc.sessionPhase == .connected {
+                // Check TOFU pin store first
+                if let key = ipc.connectedPeer?.identityKeyB64,
+                   ipc.pinStore?.isVerified(identityKeyB64: key) == true {
+                    ipc.connectedPeer?.trust = .verified
+                    print("[WT-DETECT] Known verified identity — SAS skipped")
+                } else {
+                    ipc.connectedPeer?.trust = .unverified(sas: sas)
+                    print("[WT-DETECT] SAS from daemon stderr: \(sas)")
+                }
+            }
+        }
     }
 
     // MARK: - Startup
@@ -291,6 +322,9 @@ struct ContentView: View {
             case .requesting, .connecting:
                 if let target = ipc.pendingInitiatorPeer {
                     connectingContent(target: target)
+                } else if let peer = ipc.pendingAcceptPeer {
+                    // Acceptor-side: show connecting UI using stashed accept peer info
+                    connectingContent(deviceName: peer.deviceName)
                 }
             case .idle, .disconnected:
                 discoveryContent
@@ -509,6 +543,43 @@ struct ContentView: View {
                 if let target = ipc.pendingInitiatorPeer {
                     signaling.sendSignal(toPeerCode: target.peerCode, signalType: "connection_declined")
                 }
+                ipc.resetSession()
+                clearConnectingUI()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 12))
+            .foregroundColor(.white.opacity(0.3))
+            .padding(.bottom, 8)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+
+    /// Acceptor-side connecting UI (peer accepted, waiting for WT/WS session).
+    private func connectingContent(deviceName: String) -> some View {
+        VStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(neon.opacity(0.05))
+                    .frame(width: 40, height: 40)
+                Circle()
+                    .fill(neon.opacity(0.1))
+                    .frame(width: 24, height: 24)
+                Circle()
+                    .fill(neon.opacity(0.4))
+                    .frame(width: 12, height: 12)
+            }
+            .padding(.top, 8)
+
+            Text("Establishing secure connection with **\(deviceName)**...")
+                .font(.system(size: 13))
+                .foregroundColor(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
+            Text("Waiting for encrypted channel")
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.3))
+
+            Button("Cancel") {
                 ipc.resetSession()
                 clearConnectingUI()
             }

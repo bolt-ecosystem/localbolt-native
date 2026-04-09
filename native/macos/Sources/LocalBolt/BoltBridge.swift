@@ -60,6 +60,11 @@ final class DaemonManager {
     var wtUrl: String?
     /// WebTransport cert hash hex (set after reading wt_info.json from daemon data_dir).
     var wtCertHash: String?
+    /// True when daemon has an active WT session (detected from stderr).
+    /// Latches on "[WT_SESSION]...ACTIVE_SESSION registered", clears on "cleared".
+    private(set) var wtSessionActive: Bool = false
+    /// SAS code extracted from daemon stderr "[SAS] XXXXXX" for WT sessions.
+    private(set) var wtSessionSAS: String? = nil
 
     private var handle: OpaquePointer?
     private var pollTimer: Timer?
@@ -171,8 +176,42 @@ final class DaemonManager {
             bolt_free_string(ptr)
         }
 
+        // Detect WT session lifecycle from daemon stderr.
+        // The WT endpoint does not emit IPC events, so we parse log lines:
+        //   [WT_SESSION] ... ACTIVE_SESSION registered  → session up
+        //   [WT_SESSION] ... ACTIVE_SESSION cleared      → session down
+        //   [SAS] XXXXXX                                  → verification code
+        if recentStderr.contains("ACTIVE_SESSION registered") {
+            if !wtSessionActive {
+                wtSessionActive = true
+                print("[DAEMON-POLL] WT session detected from stderr")
+            }
+        }
+        if recentStderr.contains("ACTIVE_SESSION cleared") {
+            if wtSessionActive {
+                wtSessionActive = false
+                wtSessionSAS = nil
+                print("[DAEMON-POLL] WT session ended (stderr)")
+            }
+        }
+        if wtSessionActive, wtSessionSAS == nil {
+            // Extract SAS from "[SAS] XXXXXX" log line
+            for line in recentStderr.split(separator: "\n") {
+                if let range = line.range(of: "[SAS] ") {
+                    let candidate = String(line[range.upperBound...]).prefix(6)
+                    if candidate.count == 6 {
+                        wtSessionSAS = String(candidate)
+                        print("[DAEMON-POLL] WT SAS extracted: \(wtSessionSAS!)")
+                        break
+                    }
+                }
+            }
+        }
+
         // Auto-cleanup if daemon died
         if !running {
+            wtSessionActive = false
+            wtSessionSAS = nil
             pollTimer?.invalidate()
             pollTimer = nil
             handle = nil
