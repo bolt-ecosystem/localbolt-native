@@ -44,7 +44,14 @@ if [ ! -f "$SWIFT_BIN" ]; then
 fi
 echo "[BUILD] Swift binary: $SWIFT_BIN"
 
-# Step 3: Assemble .app bundle
+# Step 3: Build bolt-daemon with WebTransport support
+DAEMON_SRC="$SCRIPT_DIR/../../../bolt-daemon"
+DAEMON_BIN="$DAEMON_SRC/target/release/bolt-daemon"
+echo "[BUILD] Building bolt-daemon (transport-ws + transport-webtransport)..."
+(cd "$DAEMON_SRC" && cargo build --release --features transport-ws,transport-webtransport)
+echo "[BUILD] Daemon binary: $DAEMON_BIN"
+
+# Step 4: Assemble .app bundle
 echo "[BUILD] Assembling ${APP_NAME}.app..."
 rm -rf "$BUNDLE_DIR"
 mkdir -p "$BUNDLE_DIR/Contents/MacOS"
@@ -56,18 +63,18 @@ cp "$SWIFT_BIN" "$BUNDLE_DIR/Contents/MacOS/${APP_NAME}"
 cp "Resources/Info.plist" "$BUNDLE_DIR/Contents/Info.plist"
 
 # Copy bolt-daemon binary into bundle (sidecar)
-DAEMON_BIN="$SCRIPT_DIR/../../../bolt-daemon/target/release/bolt-daemon"
 if [ -f "$DAEMON_BIN" ]; then
     cp "$DAEMON_BIN" "$BUNDLE_DIR/Contents/MacOS/bolt-daemon"
-    echo "[BUILD] Daemon sidecar: bundled"
+    echo "[BUILD] Daemon sidecar: bundled (WT-enabled)"
 else
-    echo "[WARN] bolt-daemon not found at $DAEMON_BIN — daemon must be on PATH"
+    echo "[FAIL] bolt-daemon not found at $DAEMON_BIN"
+    exit 1
 fi
 
 # Create PkgInfo
 echo -n "APPL????" > "$BUNDLE_DIR/Contents/PkgInfo"
 
-# Step 4: Ad-hoc code sign (required for valid bundle on macOS)
+# Step 5: Ad-hoc code sign (required for valid bundle on macOS)
 # For distribution, replace with: codesign --sign "Developer ID Application: ..."
 echo "[BUILD] Code signing (ad-hoc)..."
 # Sign the daemon sidecar first (nested code)
@@ -81,7 +88,7 @@ codesign --force --sign - \
     --entitlements "$ENTITLEMENTS" \
     "$BUNDLE_DIR"
 
-# Step 5: Verify
+# Step 6: Verify
 echo "[BUILD] Verifying..."
 codesign --verify --verbose "$BUNDLE_DIR" 2>&1 | head -3
 LINK_CHECK=$(otool -L "$BUNDLE_DIR/Contents/MacOS/${APP_NAME}" 2>&1 | grep "bolt_native_bridge" || true)
