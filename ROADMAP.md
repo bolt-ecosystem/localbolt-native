@@ -1,6 +1,11 @@
 # LocalBolt App — Roadmap
 
-**Date:** 2026-02-20
+> **SUPERSEDED (2026-04-12).** This roadmap was written for the Tauri v2 implementation (2026-02-20).
+> The Tauri path is retired. The current native app is **SwiftUI + Rust FFI + bolt-daemon sidecar** (macOS-only, v2.0.0).
+> Items referencing Tauri updater, Tauri notifications, or Tauri v2 mobile builds are no longer applicable.
+> This document is preserved for historical context.
+
+**Date:** 2026-02-20 (historical — Tauri era)
 
 ---
 
@@ -24,10 +29,10 @@
 
 ## Infrastructure Work
 
-### I1. Auto-update
-- Integrate Tauri updater plugin
-- Configure update endpoint (GitHub Releases or custom)
-- Silent background check, user-prompted install
+### ~~I1. Auto-update~~ (Tauri retired)
+- ~~Integrate Tauri updater plugin~~
+- ~~Configure update endpoint (GitHub Releases or custom)~~
+- ~~Silent background check, user-prompted install~~
 
 ### I2. Code signing
 - Apple Developer ID signing for macOS
@@ -44,17 +49,17 @@
 
 ## Feature Work
 
-### F1. Native notifications
-- Tauri notification plugin
+### ~~F1. Native notifications~~ (Tauri retired)
+- ~~Tauri notification plugin~~
 - System tray integration
 - Transfer complete / incoming request alerts
 
-### F2. Mobile builds
-- iOS build via Tauri v2
-- Android build via Tauri v2
-- Platform-specific UI adjustments
-- App store submission preparation
-- **Depends on:** I2 (code signing), I3 (daemon)
+### ~~F2. Mobile builds~~ (Tauri retired)
+- ~~iOS build via Tauri v2~~
+- ~~Android build via Tauri v2~~
+- ~~Platform-specific UI adjustments~~
+- ~~App store submission preparation~~
+- ~~**Depends on:** I2 (code signing), I3 (daemon)~~
 
 ### F3. Directory transfer
 - Native file dialog for directory selection

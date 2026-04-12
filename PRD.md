@@ -1,11 +1,15 @@
 # LocalBolt App — Product Requirements Document
 
-**Version:** 1.0.0
+> **SUPERSEDED (2026-04-12).** This PRD was written for the Tauri v2 implementation (v1.0.0, 2026-02-20).
+> The Tauri path is retired. The current native app is **SwiftUI + Rust FFI + bolt-daemon sidecar** (macOS-only, v2.0.0).
+> This document is preserved for historical context. It does not describe the current app architecture.
+
+**Version:** 1.0.0 (historical — Tauri era)
 **Date:** 2026-02-20
 
 ---
 
-## 1. Current State Summary
+## 1. Current State Summary (as of v1.0.0, Tauri era — SUPERSEDED)
 
 **Version:** v1.0.0 (production, released 2026-02-18)
 **Stack:** Tauri v2, Vanilla TypeScript, Tailwind CSS, Vite, TweetNaCl, embedded Rust signal server
@@ -52,14 +56,17 @@
 
 ---
 
-## 2. Target State (12-Month Horizon)
+## 2. Target State (12-Month Horizon) — SUPERSEDED
+
+> Items 1 and 2 below were achieved via the SwiftUI + Rust native path (not Tauri).
+> Items 3 and 4 are no longer applicable — Tauri is retired.
 
 LocalBolt App becomes the primary native Bolt client:
 
-1. Integrates bolt-daemon for background transfers and identity persistence
-2. Consumes bolt-core-sdk instead of inline TweetNaCl
-3. Auto-update via Tauri updater
-4. Mobile builds (iOS, Android) via Tauri v2
+1. ~~Integrates bolt-daemon for background transfers and identity persistence~~ **DONE (v2.0.0, SwiftUI path)**
+2. ~~Consumes bolt-core-sdk instead of inline TweetNaCl~~ **DONE (v2.0.0, Rust FFI)**
+3. ~~Auto-update via Tauri updater~~ **N/A — Tauri retired**
+4. ~~Mobile builds (iOS, Android) via Tauri v2~~ **N/A — Tauri retired**
 5. System tray integration with native notifications
 6. Directory transfer support
 
@@ -72,9 +79,9 @@ LocalBolt App becomes the primary native Bolt client:
 | Encryption source | Inline TweetNaCl | bolt-core-sdk | SDK not yet published |
 | Background transfers | In webview process | bolt-daemon IPC | Daemon not implemented |
 | Identity persistence | Session-only | Daemon-managed key store | Daemon not implemented |
-| Auto-update | None | Tauri updater plugin | Plugin integration |
-| Mobile | Entry point defined, not built | iOS + Android builds | Full mobile pipeline |
-| Notifications | Web toasts | Native OS notifications | Tauri notification plugin |
+| Auto-update | None | ~~Tauri updater plugin~~ | ~~Plugin integration~~ **Tauri retired** |
+| Mobile | Entry point defined, not built | ~~iOS + Android builds~~ | ~~Full mobile pipeline~~ **Tauri retired** |
+| Notifications | Web toasts | Native OS notifications | ~~Tauri notification plugin~~ **Tauri retired** |
 | Accessibility | None | WCAG 2.1 AA | Significant work |
 
 ---
@@ -117,10 +124,10 @@ LocalBolt App becomes the primary native Bolt client:
 | Milestone | Version | Description |
 |-----------|---------|-------------|
 | SDK migration | localbolt-app-v1.1.0 | Replace inline TweetNaCl with bolt-core-sdk |
-| Auto-update | localbolt-app-v1.2.0 | Tauri updater plugin integration |
+| ~~Auto-update~~ | ~~localbolt-app-v1.2.0~~ | ~~Tauri updater plugin integration~~ **Tauri retired** |
 | Native notifications | localbolt-app-v1.3.0 | System tray + OS notification support |
 | Daemon integration | localbolt-app-v2.0.0 | Background transfers via bolt-daemon IPC |
-| Mobile builds | localbolt-app-v2.1.0 | iOS and Android via Tauri v2 |
+| ~~Mobile builds~~ | ~~localbolt-app-v2.1.0~~ | ~~iOS and Android via Tauri v2~~ **Tauri retired** |
 | Directory transfer | localbolt-app-v2.2.0 | Recursive directory send/receive |
 
 ---
@@ -131,7 +138,7 @@ LocalBolt App becomes the primary native Bolt client:
 |------|:---:|:---:|-----------|
 | Daemon not ready in time | Medium | High | Ship v1.x without daemon; add in v2.0.0 |
 | Apple notarization issues | Medium | Medium | Apple Developer account + CI signing |
-| Tauri v2 mobile stability | Medium | Medium | Test early, track upstream issues |
+| ~~Tauri v2 mobile stability~~ | ~~Medium~~ | ~~Medium~~ | ~~Test early, track upstream issues~~ **Tauri retired** |
 | SDK migration breaks crypto | Low | Critical | Conformance test vectors validate equivalence |
 | Binary size bloat | Low | Medium | LTO + strip symbols (already configured) |
 
