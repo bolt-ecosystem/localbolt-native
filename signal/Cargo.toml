@@ -7,7 +7,7 @@ description = "WebSocket signaling server for the Bolt protocol (peer discovery 
 [dependencies]
 bolt-rendezvous-protocol = { path = "protocol" }
 tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.29"
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
