@@ -1,43 +1,51 @@
-# LocalBolt App
+# LocalBolt Native
 
-Native desktop app for [LocalBolt](https://localbolt.app). Encrypted peer-to-peer file transfer.
+Native macOS desktop app for [LocalBolt](https://localbolt.app). Encrypted peer-to-peer file transfer.
 
-## Current State
+## Download
 
-The forward native product path uses **SwiftUI on macOS** consuming `bolt-app-core` (Rust) via C-ABI FFI with a bundled daemon sidecar. Full transfer vertical: discovery, connection, pairing, verification, send/receive with progress, and `.app` bundle packaging.
+**[LocalBolt 2.0.0 for macOS →](https://github.com/the9ines/localbolt-native/releases/tag/localbolt-app-v2.0.0)**
 
-The Tauri v2 implementation is frozen — the last published Tauri release was v1.2.24.
+| | |
+|---|---|
+| **Platform** | macOS 14 (Sonoma) or later |
+| **Architecture** | Apple Silicon (M1 / M2 / M3 / M4) |
+| **Format** | DMG — drag to Applications |
+| **Signing** | Ad-hoc (not notarized) |
 
-See `docs/STATE.md` for detailed current state.
+> **First launch:** Right-click the app, click Open, then click Open again in the dialog.
+> This only needs to be done once — macOS remembers the exception.
 
-## Download (Last Tauri Release)
+Checksum verification: see [SHA256SUMS.txt](https://github.com/the9ines/localbolt-native/releases/download/localbolt-app-v2.0.0/SHA256SUMS.txt) on the release page.
 
-| Platform | Download |
-|----------|----------|
-| macOS (Apple Silicon) | [LocalBolt_1.0.0_aarch64.dmg](https://github.com/the9ines/localbolt-app/releases/latest) |
-| macOS (Intel) | [LocalBolt_1.0.0_x64.dmg](https://github.com/the9ines/localbolt-app/releases/latest) |
-| Windows | [LocalBolt_1.0.0_x64-setup.exe](https://github.com/the9ines/localbolt-app/releases/latest) |
-| Linux | [LocalBolt_1.0.0_amd64.AppImage](https://github.com/the9ines/localbolt-app/releases/latest) |
+## Architecture
 
-> **macOS:** Right-click the app, click Open, then click Open again to bypass Gatekeeper.
-> **Windows:** Click "More info" then "Run anyway" on the SmartScreen prompt.
+LocalBolt Native is a **SwiftUI** macOS app with a **Rust** cryptographic core and a bundled **bolt-daemon** sidecar.
+
+| Layer | Technology | Role |
+|-------|-----------|------|
+| UI shell | SwiftUI | macOS-native drag-and-drop, transfer progress, device discovery |
+| FFI bridge | Rust → C-ABI static library (`libbolt_native_bridge.a`) | Cryptographic operations, protocol logic |
+| Transport daemon | [bolt-daemon](https://github.com/the9ines/bolt-daemon) sidecar | WebSocket (default) + WebTransport (browser↔native) |
+| Encryption | Bolt Transfer Ratchet (BTR) | Per-transfer DH ratchet + ChaCha20-Poly1305 chunk encryption |
+| Identity | Profile Envelope v1 | NaCl-box outer encryption with Ed25519 identity keys |
+
+Browser users at [localbolt.app](https://localbolt.app) connect seamlessly with native app users — same protocol, same encryption.
 
 ## Structure
 
 ```
-localbolt-app/
-├── web/           # Frontend (Vanilla TypeScript, Tailwind, Vite) — Tauri era, frozen
-├── signal/        # Rust signal server crate (vendored bolt-rendezvous)
-├── src-tauri/     # Tauri v2 app shell — frozen, last release v1.2.24
+localbolt-native/
 ├── native/
 │   ├── shared/    # Rust C-ABI FFI bridge (libbolt_native_bridge.a)
-│   └── macos/     # SwiftUI shell scaffold (daemon lifecycle, signaling)
-└── README.md
+│   └── macos/     # SwiftUI app, build scripts, DMG packaging
+├── signal/        # Rust signal server crate (vendored bolt-rendezvous)
+└── docs/          # State, changelog, distribution plan
 ```
 
 ## Ecosystem
 
-LocalBolt App is part of the [Bolt Protocol](https://github.com/the9ines/bolt-protocol) ecosystem.
+LocalBolt Native is part of the [Bolt Protocol](https://github.com/the9ines/bolt-protocol) ecosystem.
 
 | Relationship | Repository |
 |-------------|-----------|
@@ -54,7 +62,12 @@ This is an **open-source** project. Free to use, build, and modify.
 ## Related
 
 - **[localbolt.app](https://localbolt.app)** — use it in the browser, no install
+- **[localbolt.app/download/macos](https://localbolt.app/download/macos)** — direct DMG download
 - **[LocalBolt (self-hosted)](https://github.com/the9ines/localbolt)** — download and run on your own network
+
+## Historical Note
+
+This repository previously contained a Tauri v2 cross-platform implementation (last Tauri release: v1.2.24). That implementation is frozen. The current native app is SwiftUI + Rust, macOS-only. The `web/` and `src-tauri/` directories in this repo are archived Tauri-era code and are not part of the current build.
 
 ## License
 
