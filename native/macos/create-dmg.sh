@@ -28,11 +28,11 @@ else
     VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$BUNDLE_DIR/Contents/Info.plist" 2>/dev/null || echo "2.0.0")
 fi
 
-# Determine architecture
-ARCH=$(uname -m)
+# Determine architecture from the built binary (not the host)
+ARCH=$(lipo -archs "$BUNDLE_DIR/Contents/MacOS/${APP_NAME}" 2>/dev/null || uname -m)
 case "$ARCH" in
     arm64) ARCH_LABEL="arm64" ;;
-    x86_64) ARCH_LABEL="x64" ;;
+    x86_64) ARCH_LABEL="x86_64" ;;
     *) ARCH_LABEL="$ARCH" ;;
 esac
 
