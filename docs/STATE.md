@@ -1,23 +1,43 @@
 # State — localbolt-app
 
 > Current project state. Maintained by docs-keeper agent.
-> Last refreshed: 2026-04-07 (GOVERNANCE-CODIFICATION-1)
+> Last refreshed: 2026-04-12 (GOVERNANCE-CODIFICATION-7)
 
 ---
 
 ## Latest Release
 
-- **Tag (pushed):** localbolt-app-v1.2.28-ux-parity-m4-m7
-- **HEAD:** a0f9d91
-- **Date:** 2026-04-07
+- **Tag (pushed):** localbolt-app-v2.0.1-multiarch-build
+- **HEAD:** 7482aa7
+- **Date:** 2026-04-12
 - **Tests:** 82 Rust (native/shared) + contract parity tests
+
+## Distribution (LIVE)
+
+- **Release:** [localbolt-app-v2.0.0](https://github.com/the9ines/localbolt-native/releases/tag/localbolt-app-v2.0.0)
+- **Artifacts:** `LocalBolt-2.0.0-arm64.dmg` (Apple Silicon) + `LocalBolt-2.0.0-x86_64.dmg` (Intel)
+- **Checksums:** SHA256SUMS.txt on release page
+- **Artifact host:** GitHub Releases (`the9ines/localbolt-native`)
+- **Download links:** `localbolt.app/download/macos`, `/download/macos/apple-silicon`, `/download/macos/intel`
+- **Signing:** Ad-hoc (not notarized). First launch requires right-click → Open.
+- **Requirements:** macOS 14 (Sonoma)+
+- **Auto-update:** Not implemented
+- **Repo note:** `localbolt-native` is interim name. Rename to `localbolt-app` pending GitHub support (name retired).
 
 ## Forward Path
 
 - **Product:** macOS SwiftUI shell consuming bolt-app-core via C-ABI FFI
 - **Location:** `native/macos/` (SwiftUI) + `native/shared/` (Rust FFI bridge)
-- **Retired:** `src-tauri/` — Tauri implementation reduced to thin glue, not receiving forward investment
+- **Retired:** `src-tauri/` — Tauri implementation frozen, not receiving forward investment
 - **Superseded:** bolt-ui (egui) — historical desktop shell in bolt-core-sdk
+
+## Follow-ups (not blocking initial release)
+
+| Item | Priority | Blocker |
+|------|----------|---------|
+| Apple Developer ID signing + notarization | HIGH | $99/yr Apple Developer Program enrollment |
+| Auto-update mechanism | MEDIUM | Needs at least one shipped release (done) + signing |
+| Repo rename `localbolt-native` → `localbolt-app` | LOW | GitHub support response (name retirement) |
 
 ## Dependencies (native/shared/Cargo.toml)
 

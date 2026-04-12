@@ -4,6 +4,73 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## localbolt-app-v2.0.1-multiarch-build — 2026-04-12
+
+**Commit:** 7482aa7
+
+feat: architecture-aware build pipeline for multi-arch releases.
+
+Build pipeline hardened for deterministic Apple Silicon and Intel builds.
+`build-app.sh` accepts target architecture parameter (`arm64` / `x86_64`),
+handles Rust cross-compilation and library staging automatically.
+`create-dmg.sh` detects architecture from the built binary via `lipo`.
+
+**Files changed:** native/macos/build-app.sh, native/macos/create-dmg.sh
+
+---
+
+## localbolt-app-v2.0.0-tauri-audit — 2026-04-12
+
+**Commit:** b57f19c
+
+docs: mark PRD and ROADMAP as superseded (Tauri retired).
+
+Add SUPERSEDED headers to PRD.md and ROADMAP.md. Strike through
+Tauri-specific items. Part of ecosystem-wide Tauri reference audit.
+
+**Files changed:** PRD.md, ROADMAP.md
+
+---
+
+## localbolt-app-v2.0.0-docs — 2026-04-12
+
+**Commit:** 64060b3
+
+docs: rewrite README for current SwiftUI/Rust native architecture.
+
+Remove stale Tauri-era download table. Replace with v2.0.0 download
+link, architecture table, Gatekeeper instructions, and historical note.
+
+**Files changed:** README.md
+
+---
+
+## localbolt-app-v2.0.0 — 2026-04-11
+
+**Commit:** 24f50f9
+
+First published release of the native SwiftUI macOS desktop app.
+
+- SwiftUI UI with drag-and-drop, real-time progress, transfer controls
+- Rust FFI bridge (bolt-native-bridge static library)
+- bolt-daemon sidecar (WS default + WebTransport)
+- BTR-secured transfers (per-transfer DH ratchet + ChaCha20-Poly1305)
+- Profile Envelope v1 (NaCl-box outer encryption)
+- Apple Silicon + Intel DMGs
+- Ad-hoc signed, macOS 14+, Gatekeeper bypass on first launch
+
+**Release:** https://github.com/the9ines/localbolt-native/releases/tag/localbolt-app-v2.0.0
+
+---
+
+## localbolt-app-v1.2.30-wt-session-state — 2026-04-11
+
+**Commit:** 24f50f9
+
+fix: detect WT session state from daemon stderr for native UI.
+
+---
+
 ## localbolt-app-v1.2.28-ux-parity-m4-m7 — 2026-04-07
 
 **Commit:** a0f9d91
