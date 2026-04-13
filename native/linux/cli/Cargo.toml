@@ -1,0 +1,21 @@
+[package]
+name = "localbolt-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Linux CLI helper for LocalBolt — daemon companion for Steam Deck and Linux desktop"
+license = "MIT"
+
+# LOCALBOLT-LINUX-CLI-IMPL-1: Phase 1 Linux/Steam Deck validation artifact.
+# Not the final Linux GUI shell — that is TBD (GOVERNANCE-NATIVE-SHELL-ALIGNMENT-1).
+# Consumes bolt-app-core directly (no C FFI bridge needed for Rust consumers).
+
+[[bin]]
+name = "localbolt-cli"
+path = "src/main.rs"
+
+[dependencies]
+bolt-app-core = { path = "../../../../bolt-core-sdk/rust/bolt-app-core" }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ctrlc = "3"

@@ -26,10 +26,14 @@
 
 ## Forward Path
 
-- **Product:** macOS SwiftUI shell consuming bolt-app-core via C-ABI FFI
-- **Location:** `native/macos/` (SwiftUI) + `native/shared/` (Rust FFI bridge)
+- **Product:** Platform-native shells over shared Rust core/daemon authority
+- **macOS:** SwiftUI shell consuming bolt-app-core via C-ABI FFI (`native/macos/` + `native/shared/`)
+- **Linux Phase 1:** Rust CLI helper for Steam Deck validation (`native/linux/cli/`)
+- **Linux Phase 2:** GTK4/libadwaita shell (TBD, requires governance decision)
+- **Windows/iOS:** TBD platform-native shells
 - **Retired:** `src-tauri/` — Tauri implementation frozen, not receiving forward investment
 - **Superseded:** bolt-ui (egui) — historical desktop shell in bolt-core-sdk
+- **Architecture:** `docs/MULTIPLATFORM_ARCH.md` (LOCALBOLT-APP-MULTIPLATFORM-ARCH-1)
 
 ## Follow-ups (not blocking initial release)
 
@@ -115,6 +119,15 @@
 | NATIVE-SHELL-1 closure (Tauri retirement) | DONE | `14094ed` |
 | SIGNALING-FFI-CRASH-FIX-1 | DONE | `219aedd` |
 | NATIVE-UX-SAFETY-CONTROLS-1 (M1-M3) | DONE | `e0437c9` |
+
+## Linux Phase 1 (LOCALBOLT-LINUX-CLI-IMPL-1)
+
+- **Artifact:** `localbolt-cli` — Rust CLI helper for bolt-daemon
+- **Location:** `native/linux/cli/`
+- **Target:** Linux x86_64, Steam Deck (SteamOS Desktop Mode)
+- **Status:** Scaffolded, builds locally
+- **Validates:** daemon-on-Linux, IPC contract, browser-to-native transfer
+- **Not:** the final Linux GUI shell (that is Phase 2, TBD)
 
 ## Known Open Issues
 

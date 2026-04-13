@@ -1,0 +1,52 @@
+name: CI — Native Linux CLI
+
+on:
+  push:
+    paths:
+      - 'native/linux/**'
+    branches: [main]
+  pull_request:
+    paths:
+      - 'native/linux/**'
+    branches: [main]
+
+jobs:
+  linux-cli:
+    name: Build & Test localbolt-cli
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # bolt-core-sdk is a sibling repo — check it out for path deps
+      - name: Checkout bolt-core-sdk
+        uses: actions/checkout@v4
+        with:
+          repository: the9ines/bolt-core-sdk
+          path: ../bolt-core-sdk
+
+      - name: cargo fmt
+        working-directory: native/linux/cli
+        run: cargo fmt -- --check
+
+      - name: cargo clippy
+        working-directory: native/linux/cli
+        run: cargo clippy -- -D warnings
+
+      - name: cargo test
+        working-directory: native/linux/cli
+        run: cargo test
+
+      - name: cargo build (release)
+        working-directory: native/linux/cli
+        run: cargo build --release
+
+      - name: Verify binary
+        run: |
+          file native/linux/cli/target/release/localbolt-cli
+          native/linux/cli/target/release/localbolt-cli --version
