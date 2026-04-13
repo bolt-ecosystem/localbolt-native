@@ -1,0 +1,151 @@
+name: Package — Steam Deck Test Bundle
+
+# Manual trigger only — this is a test artifact, not a release.
+on:
+  workflow_dispatch:
+
+jobs:
+  package:
+    name: Build Linux x86_64 test bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev
+
+      # Clone sibling repos at the same level as this checkout.
+      # bolt-daemon Cargo.toml uses path = "../bolt-core-sdk/rust/..."
+      # localbolt-cli uses path = "../../../../bolt-core-sdk/rust/bolt-app-core"
+      #   which resolves to $GITHUB_WORKSPACE/../bolt-core-sdk
+      - name: Clone bolt-core-sdk (sibling dependency)
+        run: git clone --depth 1 https://github.com/the9ines/bolt-core-sdk.git "${{ github.workspace }}/../bolt-core-sdk"
+
+      - name: Clone bolt-daemon (sibling repo)
+        run: git clone --depth 1 https://github.com/the9ines/bolt-daemon.git "${{ github.workspace }}/../bolt-daemon"
+
+      # ── Build localbolt-cli ───────────────────────────────────
+      - name: Build localbolt-cli (release)
+        working-directory: native/linux/cli
+        run: cargo build --release
+
+      - name: Verify localbolt-cli
+        run: |
+          file native/linux/cli/target/release/localbolt-cli
+          native/linux/cli/target/release/localbolt-cli --version
+
+      # ── Build bolt-daemon with WebTransport ───────────────────
+      - name: Build bolt-daemon (release, WS+WT)
+        working-directory: ${{ github.workspace }}/../bolt-daemon
+        run: cargo build --release --features transport-ws,transport-webtransport
+
+      - name: Verify bolt-daemon
+        run: |
+          DAEMON="${{ github.workspace }}/../bolt-daemon/target/release/bolt-daemon"
+          file "$DAEMON"
+          # Confirm WT symbols are linked (wtransport crate)
+          strings "$DAEMON" | grep -i "webtransport" | head -5 || echo "NOTE: no literal webtransport string (may be compiled out)"
+          # Confirm feature was compiled — check for WT-related symbols
+          nm -D "$DAEMON" 2>/dev/null | grep -i "wtransport" | head -5 || echo "NOTE: nm check inconclusive (stripped binary)"
+          # Log binary size
+          ls -lh "$DAEMON"
+
+      # ── Package tarball ───────────────────────────────────────
+      - name: Read CLI version
+        id: version
+        working-directory: native/linux/cli
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "cli_version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage tarball contents
+        run: |
+          VERSION="${{ steps.version.outputs.cli_version }}"
+          STAGE="build/localbolt-steamdeck-test-${VERSION}"
+          mkdir -p "$STAGE"
+
+          cp native/linux/cli/target/release/localbolt-cli "$STAGE/"
+          cp "${{ github.workspace }}/../bolt-daemon/target/release/bolt-daemon" "$STAGE/"
+          cp native/linux/cli/README.md "$STAGE/"
+
+          # Generate install script
+          cat > "$STAGE/install.sh" <<'INSTALL_EOF'
+          #!/usr/bin/env bash
+          # Install localbolt-cli + bolt-daemon to ~/.local/bin
+          set -euo pipefail
+          INSTALL_DIR="${HOME}/.local/bin"
+          mkdir -p "${INSTALL_DIR}"
+          cp localbolt-cli "${INSTALL_DIR}/"
+          chmod +x "${INSTALL_DIR}/localbolt-cli"
+          if [ -f bolt-daemon ]; then
+              cp bolt-daemon "${INSTALL_DIR}/"
+              chmod +x "${INSTALL_DIR}/bolt-daemon"
+          fi
+          echo "Installed to ${INSTALL_DIR}/"
+          echo "Ensure ${INSTALL_DIR} is in your PATH:"
+          echo '  export PATH="$HOME/.local/bin:$PATH"'
+          INSTALL_EOF
+          chmod +x "$STAGE/install.sh"
+
+          # Build info for traceability
+          DAEMON_SHA=$(cd "${{ github.workspace }}/../bolt-daemon" && git rev-parse --short HEAD)
+          SDK_SHA=$(cd "${{ github.workspace }}/../bolt-core-sdk" && git rev-parse --short HEAD)
+          cat > "$STAGE/BUILD_INFO.txt" <<BINFO_EOF
+          localbolt-steamdeck-test bundle
+          ================================
+          Date:       $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          CLI:        localbolt-cli v${VERSION}
+          Daemon:     bolt-daemon (WS+WT)
+          Features:   transport-ws,transport-webtransport
+          Arch:       x86_64-unknown-linux-gnu
+          Runner:     ubuntu-latest
+          CLI repo:   the9ines/localbolt-native @ ${{ github.sha }}
+          Daemon repo: the9ines/bolt-daemon @ ${DAEMON_SHA}
+          SDK repo:   the9ines/bolt-core-sdk @ ${SDK_SHA}
+          BINFO_EOF
+
+          ls -la "$STAGE/"
+
+      - name: Create tarball + checksum
+        run: |
+          VERSION="${{ steps.version.outputs.cli_version }}"
+          TARBALL="localbolt-steamdeck-test-${VERSION}-x86_64-linux.tar.gz"
+          cd build
+          tar czf "$TARBALL" "localbolt-steamdeck-test-${VERSION}/"
+          sha256sum "$TARBALL" > "${TARBALL}.sha256"
+          echo "=== Tarball ==="
+          ls -lh "$TARBALL"
+          cat "${TARBALL}.sha256"
+          echo ""
+          echo "=== Contents ==="
+          tar tzf "$TARBALL"
+
+      - name: Verify binary architectures
+        run: |
+          VERSION="${{ steps.version.outputs.cli_version }}"
+          cd "build/localbolt-steamdeck-test-${VERSION}"
+          echo "=== localbolt-cli ==="
+          file localbolt-cli
+          echo ""
+          echo "=== bolt-daemon ==="
+          file bolt-daemon
+          echo ""
+          # Both must be ELF 64-bit x86-64
+          file localbolt-cli | grep -q "ELF 64-bit" || { echo "FAIL: CLI is not ELF 64-bit"; exit 1; }
+          file bolt-daemon | grep -q "ELF 64-bit" || { echo "FAIL: daemon is not ELF 64-bit"; exit 1; }
+          echo "Architecture verification: PASS"
+
+      - name: Upload test bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: localbolt-steamdeck-test-${{ steps.version.outputs.cli_version }}
+          path: |
+            build/localbolt-steamdeck-test-${{ steps.version.outputs.cli_version }}-x86_64-linux.tar.gz
+            build/localbolt-steamdeck-test-${{ steps.version.outputs.cli_version }}-x86_64-linux.tar.gz.sha256
+          retention-days: 30
