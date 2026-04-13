@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - 'native/linux/**'
+      - '.github/workflows/ci-native-linux.yml'
     branches: [main]
   pull_request:
     paths:
       - 'native/linux/**'
+      - '.github/workflows/ci-native-linux.yml'
     branches: [main]
 
 jobs:
@@ -23,12 +25,12 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # bolt-core-sdk is a sibling repo — check it out for path deps
-      - name: Checkout bolt-core-sdk
-        uses: actions/checkout@v4
-        with:
-          repository: the9ines/bolt-core-sdk
-          path: ../bolt-core-sdk
+      # bolt-core-sdk is a sibling repo needed for Cargo path deps.
+      # actions/checkout refuses paths outside workspace, so use git clone.
+      # Cargo.toml: ../../../../bolt-core-sdk/rust/... resolves to ../bolt-core-sdk
+      # relative to the workspace root.
+      - name: Clone bolt-core-sdk (sibling dependency)
+        run: git clone --depth 1 https://github.com/the9ines/bolt-core-sdk.git "${{ github.workspace }}/../bolt-core-sdk"
 
       - name: cargo fmt
         working-directory: native/linux/cli
