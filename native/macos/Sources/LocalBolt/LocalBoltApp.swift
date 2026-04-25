@@ -82,8 +82,11 @@ struct LocalBoltApp: App {
                 if let wsUrl = signal.data["wsUrl"] as? String, !wsUrl.isEmpty {
                     daemon.connectToRemote(wsUrl: wsUrl)
                 } else {
-                    print("[CONNECT] connection_accepted without wsUrl — cannot establish direct WS")
-                    ipc.resetSession()
+                    // Browser peer accepted — no wsUrl (browsers can't host a WS server).
+                    // Stay in .connecting and wait for the browser to connect back to our
+                    // daemon's WebTransport endpoint. The WT session detection in
+                    // onChange(of: daemon.wtSessionActive) will advance to .connected.
+                    print("[CONNECT] connection_accepted without wsUrl — waiting for inbound WT session from browser")
                 }
             case "connection_declined":
                 // Remote peer declined — M2 onChange handler shows notice + resets

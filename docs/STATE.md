@@ -129,6 +129,12 @@
 - **Validates:** daemon-on-Linux, IPC contract, browser-to-native transfer
 - **Not:** the final Linux GUI shell (that is Phase 2, TBD)
 
+## Signaling
+
+- **Canonical cloud endpoint:** `wss://bolt-rendezvous.fly.dev`
+- **Drift guard:** `scripts/check-signaling-endpoint-drift.sh` — asserts native and web share the same endpoint
+- Both native macOS and web (via `VITE_SIGNAL_URL` env var) MUST point to the same rendezvous server
+
 ## Known Open Issues
 
-None.
+- **Native↔native LAN transfers:** May fail if macOS firewall blocks daemon WS port (3001). Requires manual firewall allow for bolt-daemon. Separate from the browser↔native fix.

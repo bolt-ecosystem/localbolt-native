@@ -4,6 +4,30 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## (pending) — 2026-04-13
+
+fix: browser↔native connectivity — stop resetting session on browserless connection_accepted
+
+**Root cause:** When a browser peer accepted a connection, the native app's
+`connection_accepted` handler called `ipc.resetSession()` because the browser
+sends no `wsUrl` (browsers cannot host a WS server). This killed the session
+before the browser could connect back via WebTransport to the native daemon.
+
+**Fix:** The else branch now stays in `.connecting` state and logs a message,
+allowing the WT session detection (`onChange(of: daemon.wtSessionActive)`) to
+advance the connection to `.connected` when the browser connects inbound.
+
+**New:** `scripts/check-signaling-endpoint-drift.sh` — CI-ready guard that
+asserts native and web apps share the same canonical signaling endpoint.
+
+**Files changed:**
+- native/macos/Sources/LocalBolt/LocalBoltApp.swift
+- scripts/check-signaling-endpoint-drift.sh
+- docs/STATE.md
+- docs/CHANGELOG.md
+
+---
+
 ## localbolt-app-v2.0.1-multiarch-build — 2026-04-12
 
 **Commit:** 7482aa7
