@@ -142,7 +142,7 @@ jobs:
           echo "Architecture verification: PASS"
 
       - name: Upload test bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: localbolt-steamdeck-test-${{ steps.version.outputs.cli_version }}
           path: |
