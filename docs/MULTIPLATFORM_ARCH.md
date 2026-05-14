@@ -78,7 +78,7 @@ Rust-native shells (CLI, GTK4-rs) depend on `bolt-app-core` directly — no FFI 
 | Linux x86_64 (GUI) | GTK4/libadwaita (TBD) | `native/linux/gtk/` | Future |
 | Windows | TBD | `native/windows/` | Future |
 | iOS | SwiftUI | `native/ios/` | Future |
-| Android | Kotlin/Compose | N/A | Future |
+| Android | Kotlin/Compose | `native/android/` | Future |
 
 ---
 
@@ -98,10 +98,11 @@ Rust-native shells (CLI, GTK4-rs) depend on `bolt-app-core` directly — no FFI 
 
 | Component | Owns | Does NOT own |
 |-----------|------|-------------|
-| **localbolt-app** | Platform shells, FFI bridge, build/packaging | Protocol, daemon runtime, crypto |
+| **localbolt-app** | Platform shells, FFI bridge, build/packaging for native/mobile apps | Protocol, daemon runtime, crypto |
 | **bolt-daemon** | Daemon binary, transports, IPC contract | UI, packaging, distribution |
 | **bolt-core-sdk** | Protocol/crypto crates, bolt-app-core | Platform shells, daemon binary |
 | **localbolt-v3** | Web product, download pages | Native apps |
+| **localbolt** | Lite self-hosted web product | Native apps |
 | **localbolt-native** (GitHub) | Release artifact hosting | Source code |
 | **bolt-ecosystem** | Governance, architecture rules | Implementation |
 
@@ -110,8 +111,22 @@ Rust-native shells (CLI, GTK4-rs) depend on `bolt-app-core` directly — no FFI 
 ## Constraints
 
 - No Tauri revival
-- No egui/bolt-ui as default product shell
+- No egui/bolt-ui revival as a product shell
 - No new repo for Linux CLI (lives in localbolt-app)
+- No new repo for iOS/Android unless governance explicitly approves it
 - Platform-native shells are the forward direction
 - Linux/Windows GUI shells require governance decision before starting
 - `localbolt-native` is interim release host until GitHub releases `localbolt-app` name
+
+## App Repo Roles
+
+| Repo | Role |
+|------|------|
+| `localbolt-app` | Canonical native/mobile shell repo |
+| `localbolt-v3` | Production web app |
+| `localbolt` | Lightweight self-hosted web app |
+
+All three app repos consume shared ecosystem code and must stay aligned through
+CI/drift checks. Transport metadata, session contracts, signaling payloads, and
+security behavior should be changed at the shared authority first, then rolled
+through the affected app repos with tests or explicit non-impact evidence.

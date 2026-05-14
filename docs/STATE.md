@@ -30,10 +30,27 @@
 - **macOS:** SwiftUI shell consuming bolt-app-core via C-ABI FFI (`native/macos/` + `native/shared/`)
 - **Linux Phase 1:** Rust CLI helper for Steam Deck validation (`native/linux/cli/`)
 - **Linux Phase 2:** GTK4/libadwaita shell (TBD, requires governance decision)
-- **Windows/iOS:** TBD platform-native shells
+- **Windows:** TBD platform-native shell
+- **iOS:** SwiftUI shell under `native/ios/` (future)
+- **Android:** Kotlin/Compose shell under `native/android/` (future)
 - **Retired:** `src-tauri/` — Tauri implementation frozen, not receiving forward investment
-- **Superseded:** bolt-ui (egui) — historical desktop shell in bolt-core-sdk
+- **Retired:** bolt-ui (egui) — historical desktop shell in bolt-core-sdk, not a fallback
 - **Architecture:** `docs/MULTIPLATFORM_ARCH.md` (LOCALBOLT-APP-MULTIPLATFORM-ARCH-1)
+
+## Product Role
+
+`localbolt-app` is the canonical home for native and mobile LocalBolt shells.
+`localbolt-v3` owns the production web app. `localbolt` owns the lightweight
+self-hosted web app. Native/mobile platform work should land under
+`localbolt-app/native/` unless governance explicitly approves a separate repo.
+
+## CI / Shared-Code Discipline
+
+The three app repos share core ecosystem behavior through `bolt-app-core`,
+`bolt-daemon`, `bolt-rendezvous`, and the LocalBolt session/transfer contracts.
+Changes to signaling metadata, app-to-app transport behavior, session states, or
+security gates must update the shared authority first, then update affected app
+repos with tests or explicit non-impact evidence.
 
 ## Follow-ups (not blocking initial release)
 
