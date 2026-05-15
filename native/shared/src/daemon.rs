@@ -299,6 +299,72 @@ pub unsafe extern "C" fn bolt_daemon_connect_remote(
     }
 }
 
+/// Trigger an outbound native connection with structured WS/QUIC metadata.
+///
+/// Q2D bridge: the daemon still falls back to WS until QUIC app-session routing
+/// is wired, but this writes the forward-compatible JSON signal shape.
+///
+/// # Safety
+/// `handle` must be valid. Non-null string pointers must be null-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_daemon_connect_remote_v2(
+    handle: *mut BoltDaemon,
+    ws_url: *const c_char,
+    quic_addr: *const c_char,
+    quic_cert_hash: *const c_char,
+) -> i32 {
+    if handle.is_null() {
+        return 0;
+    }
+    let daemon = &*handle;
+
+    let ws_url = match optional_cstr(ws_url) {
+        Ok(value) => value,
+        Err(_) => return 0,
+    };
+    let quic_addr = match optional_cstr(quic_addr) {
+        Ok(value) => value,
+        Err(_) => return 0,
+    };
+    let quic_cert_hash = match optional_cstr(quic_cert_hash) {
+        Ok(value) => value,
+        Err(_) => return 0,
+    };
+
+    if ws_url.is_none() && quic_addr.is_none() {
+        return 0;
+    }
+
+    let payload = serde_json::json!({
+        "wsUrl": ws_url,
+        "quicAddr": quic_addr,
+        "quicCertHash": quic_cert_hash,
+    });
+    let signal_path = format!("{}/connect_remote.signal", daemon.data_dir);
+    match std::fs::write(&signal_path, payload.to_string()) {
+        Ok(()) => {
+            eprintln!("[NATIVE_BRIDGE] wrote structured connect_remote.signal");
+            1
+        }
+        Err(e) => {
+            eprintln!("[NATIVE_BRIDGE] failed to write connect_remote.signal: {e}");
+            0
+        }
+    }
+}
+
+unsafe fn optional_cstr(ptr: *const c_char) -> Result<Option<String>, std::str::Utf8Error> {
+    if ptr.is_null() {
+        return Ok(None);
+    }
+    let value = CStr::from_ptr(ptr).to_str()?.trim().to_string();
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(value))
+    }
+}
+
 /// Request the daemon to pause the active transfer (DAEMON-TRANSFER-CONTROL-1).
 /// Returns 1 on success, 0 on failure.
 ///

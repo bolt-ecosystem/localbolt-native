@@ -83,7 +83,11 @@ struct LocalBoltApp: App {
             case "connection_accepted":
                 _ = ipc.beginConnecting()
                 if let wsUrl = signal.data["wsUrl"] as? String, !wsUrl.isEmpty {
-                    daemon.connectToRemote(wsUrl: wsUrl)
+                    daemon.connectToRemote(
+                        wsUrl: wsUrl,
+                        quicAddr: signal.data["quicAddr"] as? String,
+                        quicCertHash: signal.data["quicCertHash"] as? String
+                    )
                 } else {
                     // Browser peer accepted — no wsUrl (browsers can't host a WS server).
                     // Stay in .connecting and wait for the browser to connect back to our

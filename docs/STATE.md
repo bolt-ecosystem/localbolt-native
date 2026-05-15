@@ -1,7 +1,7 @@
 # State — localbolt-app
 
 > Current project state. Maintained by docs-keeper agent.
-> Last refreshed: 2026-05-15 (APP-TO-APP-QUIC-MIGRATION-1 Q2B)
+> Last refreshed: 2026-05-15 (APP-TO-APP-QUIC-MIGRATION-1 Q2D1)
 
 ---
 
@@ -54,20 +54,22 @@ repos with tests or explicit non-impact evidence.
 
 ## App↔App QUIC Migration
 
-`localbolt-app` has Q2B metadata plumbing for
+`localbolt-app` has Q2B/Q2D1 metadata plumbing for
 APP-TO-APP-QUIC-MIGRATION-1. The macOS SwiftUI shell reads daemon
 `quic_info.json` when present and includes `quicAddr` / `quicCertHash` in
 `connection_request` and `connection_accepted` payloads. Incoming request
 metadata is preserved for future acceptor-side pinning.
 
-This does not make QUIC the active app↔app path. `connectToRemote(wsUrl:)`
-still routes accepted native↔native sessions through WS client mode until
-bolt-daemon mutual cert-hash pinning, IPC/session parity, and QUIC routing gates
-are complete.
+Q2D1 added the structured native connect bridge. `connectToRemote` now passes
+the peer `wsUrl` plus optional `quicAddr` / `quicCertHash` to the Rust bridge,
+which writes JSON to `connect_remote.signal`. This does not make QUIC the
+active app↔app path: bolt-daemon currently parses the structured signal and
+falls back to WS until the QUIC app-session accept/routing bridge is wired.
 
-Validation for Q2B:
+Validation for Q2D1:
 - `swift build` in `native/macos`
 - `cargo test` in `native/shared`
+- `cargo build --release` in `native/shared` for the static bridge archive
 
 ## Follow-ups (not blocking initial release)
 

@@ -140,12 +140,19 @@ final class DaemonManager {
         }
     }
 
-    /// Connect to a remote daemon's WS endpoint (NATIVE-CONNECT-1).
+    /// Connect to a remote daemon with WS fallback plus optional QUIC metadata.
     @discardableResult
-    func connectToRemote(wsUrl: String) -> Bool {
+    func connectToRemote(wsUrl: String, quicAddr: String? = nil, quicCertHash: String? = nil) -> Bool {
         guard let h = handle else { return false }
         return wsUrl.withCString { cUrl in
-            bolt_daemon_connect_remote(h, cUrl) == 1
+            if let quicAddr, let quicCertHash {
+                return quicAddr.withCString { cQuicAddr in
+                    quicCertHash.withCString { cQuicHash in
+                        bolt_daemon_connect_remote_v2(h, cUrl, cQuicAddr, cQuicHash) == 1
+                    }
+                }
+            }
+            return bolt_daemon_connect_remote_v2(h, cUrl, nil, nil) == 1
         }
     }
 
