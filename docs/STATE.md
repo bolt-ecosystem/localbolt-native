@@ -150,7 +150,8 @@ Validation for Q2D1:
 
 | Stream | Status | Commits |
 |--------|--------|---------|
-| APP-TO-APP-QUIC-MIGRATION-1 Q2B (metadata signaling) | DONE | this state update |
+| APP-TO-APP-QUIC-MIGRATION-1 Q2D1 (structured connect signal bridge) | DONE | `7f2a6bd` |
+| APP-TO-APP-QUIC-MIGRATION-1 Q2B (metadata signaling) | DONE | prior state update |
 | NATIVE-UX-PARITY-IMPL-2 (M4-M7 UX parity) | DONE | `a0f9d91` |
 | RECONNECT-INTEGRITY-1 (TOFU pin store) | DONE | `e93a7cc` |
 | NATIVE-SHELL-1 closure (Tauri retirement) | DONE | `14094ed` |
