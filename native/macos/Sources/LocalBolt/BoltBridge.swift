@@ -60,6 +60,10 @@ final class DaemonManager {
     var wtUrl: String?
     /// WebTransport cert hash hex (set after reading wt_info.json from daemon data_dir).
     var wtCertHash: String?
+    /// QUIC host:port (set after reading quic_info.json from daemon data_dir).
+    var quicAddr: String?
+    /// QUIC cert hash hex (set after reading quic_info.json from daemon data_dir).
+    var quicCertHash: String?
     /// True when daemon has an active WT session (detected from stderr).
     /// Latches on "[WT_SESSION]...ACTIVE_SESSION registered", clears on "cleared".
     private(set) var wtSessionActive: Bool = false
@@ -121,6 +125,10 @@ final class DaemonManager {
         socketPath = ""
         dataDir = ""
         recentStderr = ""
+        wtUrl = nil
+        wtCertHash = nil
+        quicAddr = nil
+        quicCertHash = nil
     }
 
     /// Send a file to the connected peer via daemon.

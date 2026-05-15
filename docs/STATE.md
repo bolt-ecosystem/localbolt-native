@@ -1,7 +1,7 @@
 # State — localbolt-app
 
 > Current project state. Maintained by docs-keeper agent.
-> Last refreshed: 2026-04-12 (GOVERNANCE-CODIFICATION-7)
+> Last refreshed: 2026-05-15 (APP-TO-APP-QUIC-MIGRATION-1 Q2B)
 
 ---
 
@@ -51,6 +51,23 @@ The three app repos share core ecosystem behavior through `bolt-app-core`,
 Changes to signaling metadata, app-to-app transport behavior, session states, or
 security gates must update the shared authority first, then update affected app
 repos with tests or explicit non-impact evidence.
+
+## App↔App QUIC Migration
+
+`localbolt-app` has Q2B metadata plumbing for
+APP-TO-APP-QUIC-MIGRATION-1. The macOS SwiftUI shell reads daemon
+`quic_info.json` when present and includes `quicAddr` / `quicCertHash` in
+`connection_request` and `connection_accepted` payloads. Incoming request
+metadata is preserved for future acceptor-side pinning.
+
+This does not make QUIC the active app↔app path. `connectToRemote(wsUrl:)`
+still routes accepted native↔native sessions through WS client mode until
+bolt-daemon mutual cert-hash pinning, IPC/session parity, and QUIC routing gates
+are complete.
+
+Validation for Q2B:
+- `swift build` in `native/macos`
+- `cargo test` in `native/shared`
 
 ## Follow-ups (not blocking initial release)
 
@@ -131,6 +148,7 @@ repos with tests or explicit non-impact evidence.
 
 | Stream | Status | Commits |
 |--------|--------|---------|
+| APP-TO-APP-QUIC-MIGRATION-1 Q2B (metadata signaling) | DONE | this state update |
 | NATIVE-UX-PARITY-IMPL-2 (M4-M7 UX parity) | DONE | `a0f9d91` |
 | RECONNECT-INTEGRITY-1 (TOFU pin store) | DONE | `e93a7cc` |
 | NATIVE-SHELL-1 closure (Tauri retirement) | DONE | `14094ed` |

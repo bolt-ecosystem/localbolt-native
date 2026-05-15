@@ -71,11 +71,14 @@ struct LocalBoltApp: App {
             case "connection_request":
                 let deviceName = signal.data["deviceName"] as? String ?? "Unknown Device"
                 let deviceType = signal.data["deviceType"] as? String ?? "desktop"
+                var requestData = signal.data
+                requestData["deviceName"] = deviceName
+                requestData["deviceType"] = deviceType
                 _ = ipc.receiveRequest()
                 signaling.incomingConnectionRequest = IncomingSignal(
                     from: signal.from,
                     signalType: signal.signalType,
-                    data: ["deviceName": deviceName, "deviceType": deviceType]
+                    data: requestData
                 )
             case "connection_accepted":
                 _ = ipc.beginConnecting()
@@ -101,6 +104,7 @@ struct LocalBoltApp: App {
         guard daemon.daemonBinaryPath != nil, !daemon.isRunning else { return }
         daemon.start()
         let wtInfoPath = "\(daemon.dataDir)/wt_info.json"
+        let quicInfoPath = "\(daemon.dataDir)/quic_info.json"
         let pollInterval: TimeInterval = 0.25
         let maxAttempts = 20 // 5s total timeout
         DispatchQueue.global(qos: .utility).async {
@@ -120,6 +124,14 @@ struct LocalBoltApp: App {
                         self.daemon.wtUrl = "https://\(localIPAddress()):\(port)"
                     }
                     self.daemon.wtCertHash = json["wt_cert_hash"] as? String
+                }
+                // Read QUIC metadata (Q2B plumbing only; routing remains WS until Q4).
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: quicInfoPath)),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let port = json["quic_port"] as? Int {
+                        self.daemon.quicAddr = "\(localIPAddress()):\(port)"
+                    }
+                    self.daemon.quicCertHash = json["quic_cert_hash"] as? String
                 }
                 self.signaling.start(
                     localUrl: "ws://127.0.0.1:3001",
@@ -639,6 +651,8 @@ struct ContentView: View {
                     var acceptDict: [String: String] = ["wsUrl": wsUrl]
                     if let wtUrl = daemon.wtUrl { acceptDict["wtUrl"] = wtUrl }
                     if let wtHash = daemon.wtCertHash { acceptDict["certHash"] = wtHash }
+                    if let quicAddr = daemon.quicAddr { acceptDict["quicAddr"] = quicAddr }
+                    if let quicHash = daemon.quicCertHash { acceptDict["quicCertHash"] = quicHash }
                     let acceptJson = (try? JSONSerialization.data(withJSONObject: acceptDict))
                         .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
                     signaling.sendSignal(
@@ -1081,7 +1095,7 @@ struct ContentView: View {
             showDeviceList = false
         }
 
-        // Send connection_request with wsUrl + WT metadata
+        // Send connection_request with wsUrl plus optional WT/QUIC metadata.
         let wsPort = daemon.wsPort
         let wsUrl = "ws://\(localIPAddress()):\(wsPort)"
         let deviceName = Host.current().localizedName ?? "Mac"
@@ -1092,6 +1106,8 @@ struct ContentView: View {
         ]
         if let wtUrl = daemon.wtUrl { payloadDict["wtUrl"] = wtUrl }
         if let wtHash = daemon.wtCertHash { payloadDict["certHash"] = wtHash }
+        if let quicAddr = daemon.quicAddr { payloadDict["quicAddr"] = quicAddr }
+        if let quicHash = daemon.quicCertHash { payloadDict["quicCertHash"] = quicHash }
         let payload = (try? JSONSerialization.data(withJSONObject: payloadDict))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         signaling.sendSignal(toPeerCode: peer.peerCode, signalType: "connection_request", dataJson: payload)
