@@ -52,6 +52,21 @@ Changes to signaling metadata, app-to-app transport behavior, session states, or
 security gates must update the shared authority first, then update affected app
 repos with tests or explicit non-impact evidence.
 
+Forward CI gates:
+- Main CI now builds/tests `native/shared` against sibling `bolt-core-sdk`.
+- Main CI builds the macOS SwiftUI shell after producing the release Rust FFI
+  archive expected by `Package.swift`.
+- `native/shared` clippy runs as an advisory gate with the FFI raw-pointer lint
+  allowed. Existing rustfmt/clippy warning cleanup is deliberately left as a
+  separate code-quality task so this CI realignment does not rewrite working
+  bridge code.
+- Linux/Steam Deck CLI remains covered by `ci-native-linux.yml` and the manual
+  Steam Deck package workflow.
+- The old Tauri release workflow is no longer tag-triggered; it is retained only
+  as an explicit retired-path guard until native release automation is codified.
+- Manual Windows CI no longer treats `src-tauri` as a forward gate. Windows
+  native shell CI requires a future `native/windows` implementation decision.
+
 ## App↔App QUIC Migration
 
 `localbolt-app` has Q2B/Q2D1 metadata plumbing for
@@ -150,6 +165,7 @@ Validation for Q2D1:
 
 | Stream | Status | Commits |
 |--------|--------|---------|
+| CI-DEPLOY-INHERITANCE-REALIGN-1 (native CI gates + retired Tauri guards) | DONE | this state update |
 | APP-TO-APP-QUIC-MIGRATION-1 Q2D1 (structured connect signal bridge) | DONE | `7f2a6bd` |
 | APP-TO-APP-QUIC-MIGRATION-1 Q2B (metadata signaling) | DONE | prior state update |
 | NATIVE-UX-PARITY-IMPL-2 (M4-M7 UX parity) | DONE | `a0f9d91` |

@@ -31,7 +31,46 @@ jobs:
 
   # Tauri App (Rust) job removed — src-tauri is frozen (last release v1.2.24).
   # Native shell direction is SwiftUI/FFI (native/shared + native/macos).
-  # Tauri CI will be replaced with native shell CI when that work resumes.
+  # Forward native CI is enforced by native-shared + native-macos below.
+
+  native-shared:
+    name: Native Shared Bridge (Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native/shared
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          components: rustfmt, clippy
+      # native/shared uses sibling path deps:
+      # ../../../bolt-core-sdk/rust/... resolves to ../bolt-core-sdk in CI.
+      - name: Clone bolt-core-sdk (sibling dependency)
+        run: git clone --depth 1 https://github.com/the9ines/bolt-core-sdk.git "${{ github.workspace }}/../bolt-core-sdk"
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          workspaces: native/shared
+      # FFI exports intentionally accept raw C pointers; cleanup of the advisory
+      # clippy/warning backlog is tracked separately from this CI realignment.
+      - run: cargo clippy -- -A clippy::not_unsafe_ptr_arg_deref
+      - run: cargo test
+      - run: cargo build --release
+
+  native-macos:
+    name: Native macOS Shell (SwiftUI)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - name: Clone bolt-core-sdk (sibling dependency)
+        run: git clone --depth 1 https://github.com/the9ines/bolt-core-sdk.git "${{ github.workspace }}/../bolt-core-sdk"
+      - name: Build native bridge archive
+        working-directory: native/shared
+        run: cargo build --release
+      - name: Build SwiftUI shell
+        working-directory: native/macos
+        run: swift build -c release
 
   web-app:
     name: Web App (TypeScript)

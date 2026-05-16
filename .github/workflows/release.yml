@@ -1,146 +1,19 @@
-name: Release
+name: Release (native path pending)
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*.*.*'
 
 permissions:
-  contents: write
-  actions: read
+  contents: read
 
 jobs:
-  gate-ci:
-    name: Gate — Verify CI Passed
+  retired-tauri-release:
+    name: Retired Tauri release guard
     runs-on: ubuntu-latest
     steps:
-      - name: Bypass notice (workflow_dispatch)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Block retired release path
         run: |
-          echo "::warning::workflow_dispatch bypasses CI gate. Use only for emergency re-release of known-good SHA."
-
-      - name: Verify CI workflow passed for this commit
-        if: github.event_name != 'workflow_dispatch'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Checking CI status for SHA ${{ github.sha }}..."
-
-          # Resolve CI workflow ID by name
-          CI_ID=$(gh api repos/${{ github.repository }}/actions/workflows \
-            --jq '.workflows[] | select(.name=="CI") | .id')
-
-          if [ -z "$CI_ID" ]; then
-            echo "::error::Could not find CI workflow. Release blocked."
-            exit 1
-          fi
-          echo "CI workflow ID: $CI_ID"
-
-          # Poll for up to 10 minutes (CI may still be running from tag push)
-          for i in $(seq 1 20); do
-            # Get the most recent run for this SHA with event=push
-            RUN_JSON=$(gh api "repos/${{ github.repository }}/actions/workflows/${CI_ID}/runs?per_page=50" \
-              --jq "[.workflow_runs[] | select(.head_sha == \"${{ github.sha }}\" and .event == \"push\")] | sort_by(.run_number) | reverse | .[0]" 2>/dev/null || echo "null")
-
-            if [ "$RUN_JSON" = "null" ] || [ -z "$RUN_JSON" ]; then
-              echo "No CI run found for SHA ${{ github.sha }} — waiting 30s (attempt $i/20)..."
-              sleep 30
-              continue
-            fi
-
-            STATUS=$(echo "$RUN_JSON" | jq -r '.status')
-            CONCLUSION=$(echo "$RUN_JSON" | jq -r '.conclusion')
-
-            if [ "$STATUS" != "completed" ]; then
-              echo "CI status: $STATUS — waiting 30s (attempt $i/20)..."
-              sleep 30
-              continue
-            fi
-
-            if [ "$CONCLUSION" = "success" ]; then
-              echo "CI passed for ${{ github.sha }}"
-              exit 0
-            else
-              echo "::error::CI concluded with '$CONCLUSION' for ${{ github.sha }}. Release blocked."
-              exit 1
-            fi
-          done
-
-          echo "::error::CI did not complete within 10 minutes for ${{ github.sha }}. Release blocked."
+          echo "::error::The old Tauri release workflow is retired."
+          echo "localbolt-app now ships native shells over shared Rust core."
+          echo "Use native/macos/build-app.sh for macOS artifacts until native release automation is codified."
           exit 1
-
-  release:
-    needs: [gate-ci]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            args: '--target aarch64-apple-darwin'
-          - platform: macos-latest
-            args: '--target x86_64-apple-darwin'
-          - platform: ubuntu-22.04
-            args: '--bundles deb,rpm'
-          - platform: windows-latest
-            args: ''
-
-    runs-on: ${{ matrix.platform }}
-
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Install dependencies (Ubuntu)
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 20
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
-        with:
-          workspaces: './src-tauri -> target'
-
-      - name: Install web dependencies
-        run: cd web && npm ci
-
-      - name: Build web frontend
-        run: cd web && npx vite build
-
-      - name: Build and release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: v__VERSION__
-          releaseName: 'LocalBolt v__VERSION__'
-          releaseBody: |
-            ## Download
-
-            | Platform | File |
-            |----------|------|
-            | macOS (Apple Silicon) | `LocalBolt_x.x.x_aarch64.dmg` |
-            | macOS (Intel) | `LocalBolt_x.x.x_x64.dmg` |
-            | Windows | `LocalBolt_x.x.x_x64-setup.exe` |
-            | Linux (Debian/Ubuntu) | `LocalBolt_x.x.x_amd64.deb` |
-            | Linux (Fedora/RHEL) | `LocalBolt-x.x.x-1.x86_64.rpm` |
-
-            ### Installation Notes
-
-            **macOS (unsigned):** Right-click the app → Open → click "Open" to bypass Gatekeeper.
-            **Windows (unsigned):** Click "More info" → "Run anyway" on the SmartScreen prompt.
-            **Linux:** `sudo dpkg -i LocalBolt_*.deb` or `sudo rpm -i LocalBolt-*.rpm`
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}

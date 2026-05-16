@@ -1,4 +1,4 @@
-name: Windows CI (R17)
+name: Windows CI (legacy surfaces)
 
 on:
   workflow_dispatch:
@@ -24,21 +24,16 @@ jobs:
       - run: cargo test -- --nocapture
       - run: cargo build --release
 
-  tauri-app:
-    name: Tauri App (Rust)
+  tauri-retired:
+    name: Tauri App Retired Guard
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: src-tauri
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
-        with:
-          workspaces: src-tauri
-      - run: cargo fmt --check
-      - run: cargo clippy -- -D warnings
-      - run: cargo test -- --nocapture
+      - name: Confirm retired Tauri surface is not a forward CI gate
+        shell: pwsh
+        run: |
+          Write-Host "src-tauri is retired and frozen."
+          Write-Host "Forward Windows shell CI requires a native/windows implementation decision."
 
   web-app:
     name: Web App (TypeScript)
