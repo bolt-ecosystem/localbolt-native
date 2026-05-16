@@ -20,7 +20,9 @@
 
 - Tauri v2 native shell with embedded signal server on port 3001
 - Same encryption and transfer engine as localbolt (NaCl box, 16KB chunks, WebRTC)
-- Dual signaling (local embedded + cloud at localbolt-signal.fly.dev)
+- Dual signaling (local embedded + cloud signaling; historical Tauri-era
+  endpoint was localbolt-signal.fly.dev, now superseded by
+  bolt-rendezvous.fly.dev)
 - Multi-platform automated release builds (GitHub Actions)
 - Connection approval workflow (request, accept/decline, connect)
 - Security hardening (XSS, CSP, peer validation, relay candidate blocking, SAS verification)
