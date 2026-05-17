@@ -79,14 +79,14 @@ if [ ! -f "$SWIFT_BIN" ]; then
 fi
 echo "[BUILD] Swift binary: $SWIFT_BIN"
 
-# Step 3: Build bolt-daemon with WebTransport support
+# Step 3: Build bolt-daemon with native production transports.
 DAEMON_SRC="$SCRIPT_DIR/../../../bolt-daemon"
-echo "[BUILD] Building bolt-daemon (${RUST_TARGET}, transport-ws + transport-webtransport)..."
+echo "[BUILD] Building bolt-daemon (${RUST_TARGET}, native-full: WS + WT + QUIC)..."
 if $CROSS_COMPILE; then
-    (cd "$DAEMON_SRC" && cargo build --release --target "$RUST_TARGET" --features transport-ws,transport-webtransport)
+    (cd "$DAEMON_SRC" && cargo build --release --target "$RUST_TARGET" --features native-full)
     DAEMON_BIN="$DAEMON_SRC/target/${RUST_TARGET}/release/bolt-daemon"
 else
-    (cd "$DAEMON_SRC" && cargo build --release --features transport-ws,transport-webtransport)
+    (cd "$DAEMON_SRC" && cargo build --release --features native-full)
     DAEMON_BIN="$DAEMON_SRC/target/release/bolt-daemon"
 fi
 echo "[BUILD] Daemon binary: $DAEMON_BIN"
@@ -105,7 +105,7 @@ cp "Resources/Info.plist" "$BUNDLE_DIR/Contents/Info.plist"
 # Copy bolt-daemon binary into bundle (sidecar)
 if [ -f "$DAEMON_BIN" ]; then
     cp "$DAEMON_BIN" "$BUNDLE_DIR/Contents/MacOS/bolt-daemon"
-    echo "[BUILD] Daemon sidecar: bundled (WT-enabled)"
+    echo "[BUILD] Daemon sidecar: bundled (native-full)"
 else
     echo "[FAIL] bolt-daemon not found at $DAEMON_BIN"
     exit 1

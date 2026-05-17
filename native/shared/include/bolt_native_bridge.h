@@ -83,9 +83,9 @@ int bolt_daemon_resume_transfer(BoltDaemon* handle);
 /// Returns 1 on success, 0 on failure.
 int bolt_daemon_connect_remote(BoltDaemon* handle, const char* ws_url);
 
-/// Connect to a remote daemon with structured WS/QUIC metadata (Q2D).
-/// ws_url remains the current production fallback. quic_addr/quic_cert_hash
-/// are optional forward metadata for the QUIC migration path.
+/// Connect to a remote daemon with structured WS/QUIC metadata.
+/// Complete quic_addr/quic_cert_hash metadata is preferred by the daemon;
+/// ws_url remains the fallback when QUIC is unavailable.
 /// Returns 1 on success, 0 on failure.
 int bolt_daemon_connect_remote_v2(
     BoltDaemon* handle,

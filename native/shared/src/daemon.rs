@@ -301,8 +301,8 @@ pub unsafe extern "C" fn bolt_daemon_connect_remote(
 
 /// Trigger an outbound native connection with structured WS/QUIC metadata.
 ///
-/// Q2D bridge: the daemon still falls back to WS until QUIC app-session routing
-/// is wired, but this writes the forward-compatible JSON signal shape.
+/// The daemon routes complete QUIC metadata to the QUIC app-session adapter and
+/// keeps `wsUrl` as the fallback when QUIC metadata is missing or connect fails.
 ///
 /// # Safety
 /// `handle` must be valid. Non-null string pointers must be null-terminated.

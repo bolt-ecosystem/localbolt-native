@@ -129,7 +129,7 @@ struct LocalBoltApp: App {
                     }
                     self.daemon.wtCertHash = json["wt_cert_hash"] as? String
                 }
-                // Read QUIC metadata (Q2B plumbing only; routing remains WS until Q4).
+                // Read QUIC metadata for native app-to-app routing; WS remains fallback.
                 if let data = try? Data(contentsOf: URL(fileURLWithPath: quicInfoPath)),
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     if let port = json["quic_port"] as? Int {

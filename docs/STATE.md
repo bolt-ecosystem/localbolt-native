@@ -69,7 +69,7 @@ Forward CI gates:
 
 ## App↔App QUIC Migration
 
-`localbolt-app` has Q2B/Q2D1 metadata plumbing for
+`localbolt-app` has Q2/Q3/Q4 metadata and bridge plumbing for
 APP-TO-APP-QUIC-MIGRATION-1. The macOS SwiftUI shell reads daemon
 `quic_info.json` when present and includes `quicAddr` / `quicCertHash` in
 `connection_request` and `connection_accepted` payloads. Incoming request
@@ -83,6 +83,10 @@ which writes JSON to `connect_remote.signal`. When bolt-daemon is built with
 `transport-quic`, complete QUIC metadata now routes to the QUIC app-session
 adapter first; WS remains the fallback when metadata is missing or QUIC connect
 fails.
+
+Q4 native packaging now builds the bundled macOS daemon with the bolt-daemon
+`native-full` feature, enabling WS + WT + QUIC for the app sidecar while keeping
+WS fallback behavior intact.
 
 Validation for Q2D1:
 - `swift build` in `native/macos`
