@@ -1,7 +1,7 @@
 # State — localbolt-app
 
 > Current project state. Maintained by docs-keeper agent.
-> Last refreshed: 2026-05-15 (APP-TO-APP-QUIC-MIGRATION-1 Q2D1)
+> Last refreshed: 2026-05-17 (APP-TO-APP-QUIC-MIGRATION-1 Q6)
 
 ---
 
@@ -69,8 +69,8 @@ Forward CI gates:
 
 ## App↔App QUIC Migration
 
-`localbolt-app` has Q2/Q3/Q4 metadata and bridge plumbing for
-APP-TO-APP-QUIC-MIGRATION-1. The macOS SwiftUI shell reads daemon
+`localbolt-app` has Q2-Q6 metadata, bridge, packaging, and validation plumbing
+for APP-TO-APP-QUIC-MIGRATION-1. The macOS SwiftUI shell reads daemon
 `quic_info.json` when present and includes `quicAddr` / `quicCertHash` in
 `connection_request` and `connection_accepted` payloads. Incoming request
 metadata is now used for acceptor-side pinning: before the app sends
@@ -87,6 +87,12 @@ fails.
 Q4 native packaging now builds the bundled macOS daemon with the bolt-daemon
 `native-full` feature, enabling WS + WT + QUIC for the app sidecar while keeping
 WS fallback behavior intact.
+
+Q5 validation completed on 2026-05-17: two-device QUIC/BTR smoke passed in both
+directions between Mac Studio and MacBook Pro, WS fallback passed through the
+legacy WS-only signal path, disconnect propagation cleared active sessions and
+zeroized BTR state on both peers, and pairing trust enforcement plus
+QUIC-vs-WS throughput comparison are documented in the ecosystem roadmap.
 
 Validation for Q2D1:
 - `swift build` in `native/macos`
@@ -172,6 +178,8 @@ Validation for Q2D1:
 
 | Stream | Status | Commits |
 |--------|--------|---------|
+| APP-TO-APP-QUIC-MIGRATION-1 Q6 (QUIC docs graduation) | DONE | state update |
+| APP-TO-APP-QUIC-MIGRATION-1 Q4 (native-full daemon packaging) | DONE | `5ea6293` |
 | CI-DEPLOY-INHERITANCE-REALIGN-1 (native CI gates + retired Tauri guards) | DONE | this state update |
 | APP-TO-APP-QUIC-MIGRATION-1 Q2D1 (structured connect signal bridge) | DONE | `7f2a6bd` |
 | APP-TO-APP-QUIC-MIGRATION-1 Q2B (metadata signaling) | DONE | prior state update |
@@ -198,4 +206,4 @@ Validation for Q2D1:
 
 ## Known Open Issues
 
-- **Native↔native LAN transfers:** May fail if macOS firewall blocks daemon WS port (3001). Requires manual firewall allow for bolt-daemon. Separate from the browser↔native fix.
+- **Native↔native LAN transfers:** May fail if macOS firewall blocks incoming daemon connections. Requires manual firewall allow for bolt-daemon. Separate from the browser↔native fix.
