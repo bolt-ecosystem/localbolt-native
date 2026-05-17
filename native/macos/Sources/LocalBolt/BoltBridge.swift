@@ -156,6 +156,15 @@ final class DaemonManager {
         }
     }
 
+    /// Allow the requester QUIC cert hash before accepting an inbound request.
+    @discardableResult
+    func allowQuicPeerCertHash(_ quicCertHash: String?) -> Bool {
+        guard let h = handle, let quicCertHash, !quicCertHash.isEmpty else { return false }
+        return quicCertHash.withCString { cHash in
+            bolt_daemon_allow_quic_peer_cert_hash(h, cHash) == 1
+        }
+    }
+
     /// Request the daemon to disconnect the active WS session (NATIVE-SESSION-UX-2).
     @discardableResult
     func requestDisconnect() -> Bool {

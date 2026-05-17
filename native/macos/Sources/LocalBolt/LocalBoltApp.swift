@@ -652,6 +652,7 @@ struct ContentView: View {
                 Button(action: {
                     let wsPort = daemon.wsPort
                     let wsUrl = "ws://\(localIPAddress()):\(wsPort)"
+                    daemon.allowQuicPeerCertHash(request.data["quicCertHash"] as? String)
                     var acceptDict: [String: String] = ["wsUrl": wsUrl]
                     if let wtUrl = daemon.wtUrl { acceptDict["wtUrl"] = wtUrl }
                     if let wtHash = daemon.wtCertHash { acceptDict["certHash"] = wtHash }

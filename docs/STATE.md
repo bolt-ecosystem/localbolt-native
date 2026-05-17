@@ -73,13 +73,16 @@ Forward CI gates:
 APP-TO-APP-QUIC-MIGRATION-1. The macOS SwiftUI shell reads daemon
 `quic_info.json` when present and includes `quicAddr` / `quicCertHash` in
 `connection_request` and `connection_accepted` payloads. Incoming request
-metadata is preserved for future acceptor-side pinning.
+metadata is now used for acceptor-side pinning: before the app sends
+`connection_accepted`, it writes the requester's `quicCertHash` to the daemon
+allowlist signal.
 
 Q2D1 added the structured native connect bridge. `connectToRemote` now passes
 the peer `wsUrl` plus optional `quicAddr` / `quicCertHash` to the Rust bridge,
-which writes JSON to `connect_remote.signal`. This does not make QUIC the
-active app↔app path: bolt-daemon currently parses the structured signal and
-falls back to WS until the QUIC app-session accept/routing bridge is wired.
+which writes JSON to `connect_remote.signal`. When bolt-daemon is built with
+`transport-quic`, complete QUIC metadata now routes to the QUIC app-session
+adapter first; WS remains the fallback when metadata is missing or QUIC connect
+fails.
 
 Validation for Q2D1:
 - `swift build` in `native/macos`

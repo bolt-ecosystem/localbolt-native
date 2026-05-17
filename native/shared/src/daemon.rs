@@ -353,6 +353,45 @@ pub unsafe extern "C" fn bolt_daemon_connect_remote_v2(
     }
 }
 
+/// Allow a remote QUIC client certificate hash for the next inbound session.
+///
+/// The native shell calls this on the acceptor side before sending
+/// `connection_accepted`, using the requester's `quicCertHash` from
+/// `connection_request`. The daemon consumes this signal into its dynamic QUIC
+/// client-cert allowlist.
+///
+/// # Safety
+/// `handle` must be valid. `quic_cert_hash` must be a null-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_daemon_allow_quic_peer_cert_hash(
+    handle: *mut BoltDaemon,
+    quic_cert_hash: *const c_char,
+) -> i32 {
+    if handle.is_null() || quic_cert_hash.is_null() {
+        return 0;
+    }
+    let daemon = &*handle;
+    let hash = match CStr::from_ptr(quic_cert_hash).to_str() {
+        Ok(value) => value.trim(),
+        Err(_) => return 0,
+    };
+    if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return 0;
+    }
+
+    let signal_path = format!("{}/allow_quic_peer.signal", daemon.data_dir);
+    match std::fs::write(&signal_path, hash) {
+        Ok(()) => {
+            eprintln!("[NATIVE_BRIDGE] wrote allow_quic_peer.signal");
+            1
+        }
+        Err(e) => {
+            eprintln!("[NATIVE_BRIDGE] failed to write allow_quic_peer.signal: {e}");
+            0
+        }
+    }
+}
+
 unsafe fn optional_cstr(ptr: *const c_char) -> Result<Option<String>, std::str::Utf8Error> {
     if ptr.is_null() {
         return Ok(None);

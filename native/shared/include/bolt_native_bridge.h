@@ -94,6 +94,15 @@ int bolt_daemon_connect_remote_v2(
     const char* quic_cert_hash
 );
 
+/// Allow a remote QUIC client certificate hash for the next inbound session.
+/// The native shell calls this on the acceptor side before sending
+/// connection_accepted, using the requester's quicCertHash.
+/// Returns 1 on success, 0 on failure.
+int bolt_daemon_allow_quic_peer_cert_hash(
+    BoltDaemon* handle,
+    const char* quic_cert_hash
+);
+
 /// Stop the daemon and free the handle.
 /// After this call, handle is invalid.
 void bolt_daemon_stop(BoltDaemon* handle);
