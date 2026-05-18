@@ -69,19 +69,25 @@ struct LocalBoltApp: App {
         signaling.onIncomingSignal = { [self] signal in
             switch signal.signalType {
             case "connection_request":
+                guard ipc.receiveRequest() else {
+                    print("[CONNECT] ignoring connection_request while sessionPhase=\(String(describing: ipc.sessionPhase))")
+                    return
+                }
                 let deviceName = signal.data["deviceName"] as? String ?? "Unknown Device"
                 let deviceType = signal.data["deviceType"] as? String ?? "desktop"
                 var requestData = signal.data
                 requestData["deviceName"] = deviceName
                 requestData["deviceType"] = deviceType
-                _ = ipc.receiveRequest()
                 signaling.incomingConnectionRequest = IncomingSignal(
                     from: signal.from,
                     signalType: signal.signalType,
                     data: requestData
                 )
             case "connection_accepted":
-                _ = ipc.beginConnecting()
+                guard ipc.beginConnecting() else {
+                    print("[CONNECT] ignoring connection_accepted while sessionPhase=\(String(describing: ipc.sessionPhase))")
+                    return
+                }
                 if let wsUrl = signal.data["wsUrl"] as? String, !wsUrl.isEmpty {
                     daemon.connectToRemote(
                         wsUrl: wsUrl,
@@ -507,7 +513,7 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .background(.white.opacity(0.001))
-        .disabled(!ipc.isConnected || ipc.sessionPhase != .idle)
+        .disabled(!ipc.isConnected || !ipc.sessionPhase.canStartFreshConnection)
     }
 
     // MARK: - Connecting (UI animation, product-specific)
@@ -652,6 +658,21 @@ struct ContentView: View {
                 Button(action: {
                     let wsPort = daemon.wsPort
                     let wsUrl = "ws://\(localIPAddress()):\(wsPort)"
+                    // Stash peer info before accepting so a fast inbound session
+                    // can resolve the connected peer deterministically.
+                    ipc.pendingAcceptPeer = PeerSession(
+                        peerCode: request.from,
+                        deviceName: deviceName,
+                        deviceType: deviceType,
+                        trust: .legacy,
+                        identityKeyB64: nil // resolved on session-connected
+                    )
+                    guard ipc.beginConnecting() else {
+                        ipc.pendingAcceptPeer = nil
+                        signaling.incomingConnectionRequest = nil
+                        print("[CONNECT] refusing accept while sessionPhase=\(String(describing: ipc.sessionPhase))")
+                        return
+                    }
                     daemon.allowQuicPeerCertHash(request.data["quicCertHash"] as? String)
                     var acceptDict: [String: String] = ["wsUrl": wsUrl]
                     if let wtUrl = daemon.wtUrl { acceptDict["wtUrl"] = wtUrl }
@@ -666,15 +687,6 @@ struct ContentView: View {
                         dataJson: acceptJson
                     )
                     signaling.incomingConnectionRequest = nil
-                    // Stash peer info for session.connected resolution
-                    ipc.pendingAcceptPeer = PeerSession(
-                        peerCode: request.from,
-                        deviceName: deviceName,
-                        deviceType: deviceType,
-                        trust: .legacy,
-                        identityKeyB64: nil // resolved on session-connected
-                    )
-                    _ = ipc.beginConnecting()
                 }) {
                     Text("Accept")
                         .frame(maxWidth: .infinity)

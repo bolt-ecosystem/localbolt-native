@@ -539,6 +539,15 @@ enum SessionPhase: Equatable {
     // Presentation-only (native): session ended, reason available for UI display.
     // Dismissed back to idle via resetSession().
     case disconnected(reason: String)
+
+    var canStartFreshConnection: Bool {
+        switch self {
+        case .idle, .disconnected:
+            return true
+        case .requesting, .incomingRequest, .connecting, .connected:
+            return false
+        }
+    }
 }
 
 /// Transfer lifecycle phase (canonical v1 contract).
@@ -656,8 +665,14 @@ final class IpcManager {
 
     // ── Canonical session phase transitions ──────────────────
 
+    private func resetDisconnectedPresentationIfNeeded() {
+        guard case .disconnected = sessionPhase else { return }
+        resetSession()
+    }
+
     /// Transition: idle → requesting (user selects peer).
     func beginRequest(peer: DiscoveredPeer) -> Bool {
+        resetDisconnectedPresentationIfNeeded()
         guard sessionPhase == .idle else { return false }
         sessionPhase = .requesting
         pendingInitiatorPeer = peer
@@ -666,6 +681,7 @@ final class IpcManager {
 
     /// Transition: idle → incomingRequest (signal received from remote).
     func receiveRequest() -> Bool {
+        resetDisconnectedPresentationIfNeeded()
         guard sessionPhase == .idle else { return false }
         sessionPhase = .incomingRequest
         return true
@@ -710,7 +726,13 @@ final class IpcManager {
     func disconnectSession(reason: String) {
         sessionPhase = .disconnected(reason: reason)
         connectedPeer = nil
+        connectedPeerCount = 0
         transferPhase = .idle
+        transferFileSizeBytes = 0
+        transferPaused = false
+        pendingRequest = nil
+        pendingAcceptPeer = nil
+        pendingInitiatorPeer = nil
     }
 
     /// Check if a generation is still current (INV-5).
