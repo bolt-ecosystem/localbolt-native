@@ -2,7 +2,8 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect } from 'vitest';
-import { computeUnifiedStatus } from '@/sections/header';
+import { store } from '@the9ines/bolt-transport-web';
+import { computeUnifiedStatus, createHeader } from '@/sections/header';
 import type { WatchdogState, SignalStatus } from '@/services/daemon';
 
 describe('computeUnifiedStatus', () => {
@@ -31,9 +32,9 @@ describe('computeUnifiedStatus', () => {
   });
 
   // Daemon ready — signal determines unified status
-  it('ready + active = HEALTHY', () => {
+  it('ready + active = NEARBY', () => {
     const result = computeUnifiedStatus('ready', 'active');
-    expect(result.label).toBe('HEALTHY');
+    expect(result.label).toBe('NEARBY');
     expect(result.dot).toContain('bg-neon');
   });
 
@@ -53,5 +54,18 @@ describe('computeUnifiedStatus', () => {
     const result = computeUnifiedStatus('ready', 'unknown');
     expect(result.label).toBe('STARTING');
     expect(result.dot).toContain('bg-gray');
+  });
+
+  it('renders daemon and signal status indicators', () => {
+    const header = createHeader();
+    expect(header.querySelector('.unified-label')?.textContent).toBe('STARTING');
+    expect(header.querySelector('.daemon-label')?.textContent).toBe('DAEMON');
+    expect(header.querySelector('.signal-label')?.textContent).toBe('SIGNAL ...');
+
+    store.setState({ signalingConnected: true });
+    expect(header.querySelector('.signal-dot')?.className).toContain('bg-neon');
+
+    store.setState({ signalingConnected: false });
+    expect(header.querySelector('.signal-dot')?.className).toContain('bg-red');
   });
 });

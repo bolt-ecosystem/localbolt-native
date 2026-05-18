@@ -9,7 +9,7 @@ EXIT=0
 
 # 1) Check for deep imports
 echo "--- Deep import check ---"
-if grep -rn '@the9ines/bolt-transport-web/' "$SRC_DIR" --include='*.ts' --include='*.tsx'; then
+if grep -rnE "from ['\"]@the9ines/bolt-transport-web/|import\\(['\"]@the9ines/bolt-transport-web/" "$SRC_DIR" --include='*.ts' --include='*.tsx'; then
   echo "FAIL: deep imports detected (use barrel import only)"
   EXIT=1
 else

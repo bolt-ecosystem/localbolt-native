@@ -14,24 +14,27 @@ fi
 
 EXPECTED=$(tr -d '[:space:]' < "$VERSION_FILE")
 
-JSON=$(npm ls "$PKG" --json --prefix web 2>/dev/null || true)
-
-# Count resolved instances and extract versions
 VERSIONS=$(node -e "
-  const data = JSON.parse(process.argv[1]);
+  const fs = require('fs');
+  const path = require('path');
+  const root = path.join(process.cwd(), 'web', 'node_modules');
   const versions = [];
-  function walk(obj) {
-    if (!obj || typeof obj !== 'object') return;
-    if (obj.dependencies) {
-      for (const [name, dep] of Object.entries(obj.dependencies)) {
-        if (name === '$PKG' && dep.version) versions.push(dep.version);
-        walk(dep);
+  function walk(dir) {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.name === '.bin') continue;
+      if (entry.name === '@the9ines') {
+        const pkg = path.join(full, 'bolt-transport-web', 'package.json');
+        if (fs.existsSync(pkg)) versions.push(JSON.parse(fs.readFileSync(pkg, 'utf8')).version);
       }
+      walk(path.join(full, 'node_modules'));
     }
   }
-  walk(data);
+  walk(root);
   console.log(JSON.stringify(versions));
-" "$JSON")
+")
 
 COUNT=$(node -e "console.log(JSON.parse(process.argv[1]).length)" "$VERSIONS")
 INSTALLED=$(node -e "const v = JSON.parse(process.argv[1]); if (v.length > 0) console.log(v[0]); else console.log('NONE')" "$VERSIONS")

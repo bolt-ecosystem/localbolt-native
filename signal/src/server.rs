@@ -161,6 +161,7 @@ fn ws_config() -> Option<WebSocketConfig> {
 // ── Connection Handler ──────────────────────────────────────────────────
 
 /// Handle a single incoming TCP connection: upgrade to WebSocket and process messages.
+#[allow(clippy::result_large_err)]
 pub async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
