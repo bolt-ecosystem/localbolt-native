@@ -1,18 +1,19 @@
 # State — localbolt-app
 
 > Current project state. Maintained by docs-keeper agent.
-> Last refreshed: 2026-05-17 (APP-TO-APP-QUIC-MIGRATION-1 Q6)
+> Last refreshed: 2026-05-18 (native reconnect fix + LocalBolt state audit)
 
 ---
 
-## Latest Release
+## Latest Validated Main
 
-- **Tag (pushed):** localbolt-app-v2.0.1-multiarch-build
-- **HEAD:** 7482aa7
-- **Date:** 2026-04-12
-- **Tests:** 82 Rust (native/shared) + contract parity tests
+- **HEAD:** `7aaf4dc` (`fix(mac): reset stale disconnect state before reconnect`)
+- **Date:** 2026-05-18
+- **Validation:** `cargo test` in `native/shared`, `swift build -c release` in
+  `native/macos`, local x86_64 bundle build, MacBook Pro deploy, GitHub CI, and
+  CodeQL all passed.
 
-## Distribution (LIVE)
+## Latest Public Release
 
 - **Release:** [localbolt-app-v2.0.0](https://github.com/the9ines/localbolt-native/releases/tag/localbolt-app-v2.0.0)
 - **Artifacts:** `LocalBolt-2.0.0-arm64.dmg` (Apple Silicon) + `LocalBolt-2.0.0-x86_64.dmg` (Intel)
@@ -93,6 +94,16 @@ directions between Mac Studio and MacBook Pro, WS fallback passed through the
 legacy WS-only signal path, disconnect propagation cleared active sessions and
 zeroized BTR state on both peers, and pairing trust enforcement plus
 QUIC-vs-WS throughput comparison are documented in the ecosystem roadmap.
+
+On 2026-05-18, a native session-state bug was fixed after a real-device report:
+if the user disconnected a native↔native session and immediately attempted a
+browser↔native connection, the daemon could establish while the macOS UI stayed
+in the presentation-only disconnected phase. The macOS state machine now clears
+that presentation state before a fresh request, rejects incoming/accepted
+signals when the canonical transition is illegal, and stashes acceptor peer
+state before signaling acceptance. The fixed x86_64 app bundle was built on Mac
+Studio, copied to MacBook Pro, verified there, and the bundled daemon sidecar
+was registered as allowed in the MacBook firewall.
 
 Validation for Q2D1:
 - `swift build` in `native/macos`
@@ -178,6 +189,8 @@ Validation for Q2D1:
 
 | Stream | Status | Commits |
 |--------|--------|---------|
+| NATIVE-RECONNECT-STATE-1 (disconnect → fresh connect state reset) | DONE | `7aaf4dc` |
+| MACBOOK-FIREWALL-DEPLOY-1 (build on Studio, deploy/register sidecar on MacBook) | DONE | `a9deac0` |
 | APP-TO-APP-QUIC-MIGRATION-1 Q6 (QUIC docs graduation) | DONE | state update |
 | APP-TO-APP-QUIC-MIGRATION-1 Q4 (native-full daemon packaging) | DONE | `5ea6293` |
 | CI-DEPLOY-INHERITANCE-REALIGN-1 (native CI gates + retired Tauri guards) | DONE | this state update |
@@ -206,4 +219,11 @@ Validation for Q2D1:
 
 ## Known Open Issues
 
-- **Native↔native LAN transfers:** May fail if macOS firewall blocks incoming daemon connections. Requires manual firewall allow for bolt-daemon. Separate from the browser↔native fix.
+- **Public macOS distribution:** Current public DMGs are still ad-hoc signed and
+  not notarized. First launch may require right-click -> Open, and firewall
+  trust can be reset by ad-hoc rebuilds. The repo-local MacBook deploy script
+  registers the bundled daemon sidecar for development smoke tests, but the
+  production fix is Developer ID signing + notarization.
+- **Release freshness:** GitHub Releases still points at the older public
+  `LocalBolt-2.0.0` DMGs. Current validated main needs fresh release artifacts
+  before public download links represent the QUIC-native build.
