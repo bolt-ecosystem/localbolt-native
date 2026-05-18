@@ -21,6 +21,12 @@ BUILD_MODE="${1:-release}"
 TARGET_ARCH="${2:-$(uname -m)}"
 BUNDLE_DIR="$SCRIPT_DIR/build/${APP_NAME}.app"
 ENTITLEMENTS="$SCRIPT_DIR/Resources/LocalBolt.entitlements"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+if [ "$CODESIGN_IDENTITY" = "-" ]; then
+    CODESIGN_LABEL="ad-hoc"
+else
+    CODESIGN_LABEL="$CODESIGN_IDENTITY"
+fi
 
 # Resolve Rust target triple
 case "$TARGET_ARCH" in
@@ -114,17 +120,20 @@ fi
 # Create PkgInfo
 echo -n "APPL????" > "$BUNDLE_DIR/Contents/PkgInfo"
 
-# Step 5: Ad-hoc code sign (required for valid bundle on macOS)
-# For distribution, replace with: codesign --sign "Developer ID Application: ..."
-echo "[BUILD] Code signing (ad-hoc)..."
+# Step 5: Code sign (required for valid bundle on macOS).
+#
+# Set CODESIGN_IDENTITY to a stable Developer ID or local development signing
+# certificate so macOS Firewall can remember the app/daemon across rebuilds.
+# Falls back to ad-hoc signing for machines without a signing identity.
+echo "[BUILD] Code signing (${CODESIGN_LABEL})..."
 # Sign the daemon sidecar first (nested code)
 if [ -f "$BUNDLE_DIR/Contents/MacOS/bolt-daemon" ]; then
-    codesign --force --sign - \
+    codesign --force --sign "$CODESIGN_IDENTITY" \
         --entitlements "$ENTITLEMENTS" \
         "$BUNDLE_DIR/Contents/MacOS/bolt-daemon"
 fi
 # Sign the main app bundle
-codesign --force --sign - \
+codesign --force --sign "$CODESIGN_IDENTITY" \
     --entitlements "$ENTITLEMENTS" \
     "$BUNDLE_DIR"
 
@@ -159,12 +168,12 @@ echo "=== Build complete ==="
 echo "  App:    $BUNDLE_DIR"
 echo "  Arch:   $TARGET_ARCH"
 echo "  Size:   $(du -sh "$BUNDLE_DIR" | cut -f1)"
-echo "  Signed: ad-hoc (replace with Developer ID for distribution)"
+echo "  Signed: $CODESIGN_LABEL"
 echo ""
 echo "  Run:    open $BUNDLE_DIR"
 echo "  Or:     $BUNDLE_DIR/Contents/MacOS/${APP_NAME}"
 echo ""
 echo "  Distribution checklist:"
-echo "    [ ] Replace ad-hoc sign with: codesign --sign 'Developer ID Application: ...'"
+echo "    [ ] Set CODESIGN_IDENTITY='Developer ID Application: ...'"
 echo "    [ ] Notarize with: xcrun notarytool submit LocalBolt.dmg --apple-id ... --team-id ..."
 echo "    [ ] Staple with: xcrun stapler staple LocalBolt.app"
