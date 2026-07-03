@@ -201,34 +201,43 @@ final class DaemonManager {
         }
 
         // Detect WT session lifecycle from daemon stderr.
-        // The WT endpoint does not emit IPC events, so we parse log lines:
-        //   [WT_SESSION] ... ACTIVE_SESSION registered  → session up
-        //   [WT_SESSION] ... ACTIVE_SESSION cleared      → session down
-        //   [SAS] XXXXXX                                  → verification code
-        if recentStderr.contains("ACTIVE_SESSION registered") {
-            if !wtSessionActive {
-                wtSessionActive = true
-                print("[DAEMON-POLL] WT session detected from stderr")
+        // The bridge exposes a rolling tail, so parse in order and honor only
+        // the latest lifecycle token. Otherwise stale "cleared" or "[SAS]"
+        // lines from a previous session can poison reconnect state.
+        var latestWtLifecycle: Bool?
+        var pendingSas: String?
+        var latestRegisteredSas: String?
+        for line in recentStderr.split(separator: "\n") {
+            if let range = line.range(of: "[SAS] ") {
+                let candidate = String(line[range.upperBound...]).prefix(6)
+                if candidate.count == 6 {
+                    pendingSas = String(candidate)
+                }
+            }
+            if line.contains("ACTIVE_SESSION registered") {
+                latestWtLifecycle = true
+                latestRegisteredSas = pendingSas
+            } else if line.contains("ACTIVE_SESSION cleared") {
+                latestWtLifecycle = false
+                latestRegisteredSas = nil
             }
         }
-        if recentStderr.contains("ACTIVE_SESSION cleared") {
-            if wtSessionActive {
+
+        if let latestWtLifecycle {
+            if latestWtLifecycle {
+                if !wtSessionActive {
+                    wtSessionActive = true
+                    wtSessionSAS = nil
+                    print("[DAEMON-POLL] WT session detected from stderr")
+                }
+                if let sas = latestRegisteredSas, wtSessionSAS != sas {
+                    wtSessionSAS = sas
+                    print("[DAEMON-POLL] WT SAS extracted: \(sas)")
+                }
+            } else if wtSessionActive {
                 wtSessionActive = false
                 wtSessionSAS = nil
                 print("[DAEMON-POLL] WT session ended (stderr)")
-            }
-        }
-        if wtSessionActive, wtSessionSAS == nil {
-            // Extract SAS from "[SAS] XXXXXX" log line
-            for line in recentStderr.split(separator: "\n") {
-                if let range = line.range(of: "[SAS] ") {
-                    let candidate = String(line[range.upperBound...]).prefix(6)
-                    if candidate.count == 6 {
-                        wtSessionSAS = String(candidate)
-                        print("[DAEMON-POLL] WT SAS extracted: \(wtSessionSAS!)")
-                        break
-                    }
-                }
             }
         }
 

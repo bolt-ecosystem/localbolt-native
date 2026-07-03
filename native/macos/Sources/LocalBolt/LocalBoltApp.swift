@@ -256,7 +256,17 @@ struct ContentView: View {
                 if let pending = ipc.pendingAcceptPeer {
                     ipc.connectedPeer = pending
                     ipc.pendingAcceptPeer = nil
+                } else if let target = ipc.pendingInitiatorPeer {
+                    ipc.connectedPeer = PeerSession(
+                        peerCode: target.peerCode,
+                        deviceName: target.deviceName,
+                        deviceType: target.deviceType,
+                        trust: .legacy,
+                        identityKeyB64: nil
+                    )
+                    ipc.pendingInitiatorPeer = nil
                 }
+                applyWtVerificationCode(daemon.wtSessionSAS)
                 print("[WT-DETECT] Advanced to .connected from daemon stderr")
             }
             if !daemon.wtSessionActive && ipc.sessionPhase == .connected {
@@ -266,17 +276,20 @@ struct ContentView: View {
         }
         // WT SAS: apply verification state from daemon stderr
         .onChange(of: daemon.wtSessionSAS) {
-            if let sas = daemon.wtSessionSAS, ipc.sessionPhase == .connected {
-                // Check TOFU pin store first
-                if let key = ipc.connectedPeer?.identityKeyB64,
-                   ipc.pinStore?.isVerified(identityKeyB64: key) == true {
-                    ipc.connectedPeer?.trust = .verified
-                    print("[WT-DETECT] Known verified identity — SAS skipped")
-                } else {
-                    ipc.connectedPeer?.trust = .unverified(sas: sas)
-                    print("[WT-DETECT] SAS from daemon stderr: \(sas)")
-                }
-            }
+            applyWtVerificationCode(daemon.wtSessionSAS)
+        }
+    }
+
+    private func applyWtVerificationCode(_ sas: String?) {
+        guard let sas, ipc.sessionPhase == .connected else { return }
+        // Check TOFU pin store first
+        if let key = ipc.connectedPeer?.identityKeyB64,
+           ipc.pinStore?.isVerified(identityKeyB64: key) == true {
+            ipc.connectedPeer?.trust = .verified
+            print("[WT-DETECT] Known verified identity — SAS skipped")
+        } else {
+            ipc.connectedPeer?.trust = .unverified(sas: sas)
+            print("[WT-DETECT] SAS from daemon stderr: \(sas)")
         }
     }
 

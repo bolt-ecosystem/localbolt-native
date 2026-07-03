@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## fix(mac): order-aware WT lifecycle parsing + initiator session handling — 2026-07-03
+
+Recovered May-era working-tree progress (found uncommitted during the
+Governance OS sweep, kept per PM direction). BoltBridge now parses the daemon
+stderr tail in order and honors only the latest lifecycle token, so stale
+"cleared"/"[SAS]" lines from a prior session cannot poison reconnect state;
+the SAS is associated with its registered session. LocalBoltApp populates
+connectedPeer from pendingInitiatorPeer on initiator-side WT connects and
+applies SAS verification through a shared applyWtVerificationCode() helper on
+connect and on SAS change.
+
+Validation: `swift build` clean (compile-validated per
+`os/rules/validation-protocol.md`); runtime validation tracked in the
+App↔Browser manual checklist.
+
+---
+
 ## (pending) — 2026-04-13
 
 fix: browser↔native connectivity — stop resetting session on browserless connection_accepted
