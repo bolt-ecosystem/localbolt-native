@@ -33,7 +33,8 @@ ARCH=$(lipo -archs "$BUNDLE_DIR/Contents/MacOS/${APP_NAME}" 2>/dev/null || uname
 case "$ARCH" in
     arm64) ARCH_LABEL="arm64" ;;
     x86_64) ARCH_LABEL="x86_64" ;;
-    *) ARCH_LABEL="$ARCH" ;;
+    *arm64*x86_64* | *x86_64*arm64*) ARCH_LABEL="universal" ;;
+    *) ARCH_LABEL=$(echo "$ARCH" | tr ' ' '-') ;;
 esac
 
 DMG_NAME="${APP_NAME}-${VERSION}-${ARCH_LABEL}.dmg"
