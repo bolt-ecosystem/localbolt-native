@@ -1,0 +1,22 @@
+[package]
+name = "localbolt-gtk"
+version = "0.1.0"
+edition = "2021"
+description = "LocalBolt — GTK4/libadwaita shell for Linux and Steam Deck"
+license = "MIT"
+
+# GTK4 + libadwaita GUI shell over bolt-app-core (the shared Rust app runtime the
+# CLI and SwiftUI shells also use). No C FFI bridge — Rust consumes Rust directly.
+# Target: Flatpak on Flathub for the Steam Deck.
+
+[[bin]]
+name = "localbolt"
+path = "src/main.rs"
+
+[dependencies]
+bolt-app-core = { path = "../../../../bolt-core-sdk/rust/bolt-app-core" }
+gtk = { package = "gtk4", version = "0.9", features = ["v4_10"] }
+adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
+glib = "0.20"
+async-channel = "2"
+serde_json = "1"
