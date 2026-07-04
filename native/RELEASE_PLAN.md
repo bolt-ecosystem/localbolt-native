@@ -39,8 +39,16 @@ then "Add as non-Steam Game" for Game Mode). AppImage is a portable fallback.
   Rust core directly with *no* FFI bridge, renders on the GPU (good for Game Mode + controller),
   and Flatpaks cleanly. Alternative: **GTK4 / Qt** (more desktop-idiomatic, but needs the C-ABI
   bridge and is mouse-oriented).
-- **Daemon:** verify `bolt-daemon` builds for `x86_64-unknown-linux-gnu` (the Deck's arch) —
-  a cheap de-risk we can run anytime.
+- **Daemon (checked 2026-07-03):** Linux-compatible — **no** macOS-specific code (zero
+  `target_os` cfgs / macOS APIs; the transitive `core-foundation`/`security-framework` are
+  cfg-gated to macOS), and the hard deps (ring, quinn, wtransport, tokio, rustls) cross-compile
+  for x86_64 Linux via zig. **One cleanup first:** the daemon also pulls `native-tls` (OpenSSL)
+  for WebSocket TLS while it already uses `rustls`/ring for QUIC — so a Linux build needs system
+  `libssl` (fine on the Deck / in a Flatpak runtime), and a green *cross*-build from macOS is
+  blocked only by the missing Linux OpenSSL. **Switch the WS transport to rustls to drop
+  native-tls/OpenSSL** → pure-ring crypto, trivial cross-compile, and a lighter Flatpak. (Possibly
+  WSS isn't needed at all given envelope-layer NaCl encryption on LAN.) A definitive green build
+  is one `docker run rust:bookworm cargo build --features native-full` on Linux / in CI.
 - **Package:** Flatpak manifest → Flathub submission (free; Flathub handles trust + auto-update).
   Grant `--share=network` for LAN discovery.
 - **Deck UX:** large touch targets, controller navigation, on-screen keyboard; works in both
