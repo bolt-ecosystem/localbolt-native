@@ -2,10 +2,11 @@
 //!
 //! A thin native UI over `bolt-app-core` (the shared Rust app runtime used by the
 //! CLI and the SwiftUI shell). This shell owns no protocol logic: it starts the
-//! daemon via `DaemonLifecycle`, receives IPC/bridge events, and renders them.
+//! daemon via `DaemonLifecycle`, receives IPC/bridge events, and sends decisions.
 //!
-//! v1 scope: launch the engine, show its state, and surface live events (peers,
-//! pairing, SAS, transfers). Interactive connect / SAS-confirm / send land next.
+//! v2 scope: the **acceptor flow** — when another device connects to this one,
+//! confirm the SAS, accept an incoming file, and watch it transfer. (Initiating a
+//! connection from this device — discovery + Connect — lands next.)
 
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -13,6 +14,11 @@ use std::sync::Arc;
 
 use adw::prelude::*;
 use bolt_app_core::daemon_lifecycle::DaemonLifecycle;
+use bolt_app_core::ipc_bridge_core::IpcBridgeCore;
+use bolt_app_core::ipc_types::{
+    Decision, IpcMessage, PairingDecisionPayload, PairingRequestPayload,
+    TransferIncomingDecisionPayload, TransferIncomingRequestPayload,
+};
 use gtk::glib;
 
 const APP_ID: &str = "com.the9ines.LocalBolt";
@@ -25,27 +31,24 @@ fn main() -> glib::ExitCode {
 }
 
 fn build_ui(app: &adw::Application) {
-    // Channel: the daemon's bridge callback runs on a background thread; forward
-    // its events to the GTK main loop where we can safely touch widgets.
+    // The daemon's bridge callback runs on a background thread; forward its events
+    // to the GTK main loop where widgets can be touched safely.
     let (tx, rx) = async_channel::unbounded::<(String, serde_json::Value)>();
 
-    // ── Content ──────────────────────────────────────────────
+    // ── Widgets ──────────────────────────────────────────────
     let status = adw::StatusPage::builder()
         .icon_name("network-transmit-receive-symbolic")
         .title("Starting…")
         .description("Launching the LocalBolt engine")
-        .build();
-
-    let events = gtk::ListBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .css_classes(["boxed-list"])
-        .valign(gtk::Align::Start)
-        .build();
-
-    let events_scroll = gtk::ScrolledWindow::builder()
         .vexpand(true)
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .child(&events)
+        .build();
+
+    let progress = gtk::ProgressBar::builder()
+        .show_text(true)
+        .text("")
+        .visible(false)
+        .margin_start(24)
+        .margin_end(24)
         .build();
 
     let credit = gtk::Label::builder()
@@ -57,12 +60,8 @@ fn build_ui(app: &adw::Application) {
         .build();
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    content.set_margin_top(12);
-    content.set_margin_bottom(12);
-    content.set_margin_start(12);
-    content.set_margin_end(12);
     content.append(&status);
-    content.append(&events_scroll);
+    content.append(&progress);
     content.append(&credit);
 
     let toolbar = adw::ToolbarView::new();
@@ -73,38 +72,15 @@ fn build_ui(app: &adw::Application) {
         .application(app)
         .title("LocalBolt")
         .default_width(460)
-        .default_height(640)
+        .default_height(560)
         .content(&toolbar)
         .build();
 
-    // ── Receive events on the main thread ────────────────────
-    let status_for_events = status.clone();
-    glib::spawn_future_local(async move {
-        while let Ok((name, payload)) = rx.recv().await {
-            match name.as_str() {
-                "watchdog" => {
-                    if payload.get("state").and_then(|s| s.as_str()) == Some("Ready") {
-                        status_for_events.set_title("Ready");
-                        status_for_events
-                            .set_description(Some("Searching for devices on your network"));
-                        status_for_events.set_icon_name(Some("network-wireless-symbolic"));
-                    }
-                }
-                _ => {
-                    let row = adw::ActionRow::builder()
-                        .title(&name)
-                        .subtitle(&compact(&payload))
-                        .build();
-                    events.prepend(&row);
-                }
-            }
-        }
-    });
-
-    // ── Wire + start the daemon lifecycle ────────────────────
+    // ── Daemon lifecycle ─────────────────────────────────────
     let mut lifecycle = DaemonLifecycle::new(APP_VERSION);
     lifecycle.add_binary_search_paths(dev_daemon_paths());
     let lifecycle = Arc::new(lifecycle);
+    let bridge = Arc::clone(&lifecycle.bridge);
 
     let tx_bridge = tx.clone();
     lifecycle.set_bridge_event_callback(Box::new(move |name, payload| {
@@ -114,37 +90,183 @@ fn build_ui(app: &adw::Application) {
     lifecycle.set_watchdog_callback(Box::new(move |ev| {
         let _ = tx_watchdog.send_blocking((
             "watchdog".to_string(),
-            serde_json::json!({ "state": format!("{:?}", ev.state), "retry": ev.retry_count }),
+            serde_json::json!({ "state": format!("{:?}", ev.state) }),
         ));
     }));
-    lifecycle.start(); // spawns the supervision thread (holds its own Arc)
+    lifecycle.start();
 
-    // Ask the daemon to shut down cleanly when the window closes.
     let lc = Arc::clone(&lifecycle);
     window.connect_close_request(move |_| {
         lc.shutdown_flag().store(true, Ordering::Relaxed);
         glib::Propagation::Proceed
     });
 
+    // ── Event loop (main thread) ─────────────────────────────
+    let win = window.clone();
+    glib::spawn_future_local(async move {
+        while let Ok((name, payload)) = rx.recv().await {
+            match name.as_str() {
+                "watchdog" => {
+                    if payload["state"] == "Ready" {
+                        idle(&status, "Ready", "Waiting for a device to connect");
+                    }
+                }
+                "daemon://pairing-request" => {
+                    if let Ok(req) = serde_json::from_value::<PairingRequestPayload>(payload) {
+                        show_pairing_dialog(&win, &bridge, req);
+                    }
+                }
+                "daemon://transfer-request" => {
+                    if let Ok(req) =
+                        serde_json::from_value::<TransferIncomingRequestPayload>(payload)
+                    {
+                        show_transfer_dialog(&win, &bridge, req);
+                    }
+                }
+                "daemon://session-connected" => {
+                    idle(&status, "Connected", "Secure channel established");
+                }
+                "daemon://transfer-started" => {
+                    let file = payload["file_name"].as_str().unwrap_or("file").to_string();
+                    status.set_title("Receiving…");
+                    status.set_description(Some(&file));
+                    status.set_icon_name(Some("folder-download-symbolic"));
+                    progress.set_fraction(0.0);
+                    progress.set_text(Some(&file));
+                    progress.set_visible(true);
+                }
+                "daemon://transfer-progress" => {
+                    if let Some(f) = payload["progress"].as_f64() {
+                        progress.set_fraction(f.clamp(0.0, 1.0));
+                    }
+                }
+                "daemon://transfer-complete" => {
+                    let file = payload["file_name"].as_str().unwrap_or("file");
+                    progress.set_visible(false);
+                    idle(
+                        &status,
+                        "Received",
+                        &format!("Saved {file} to your Downloads"),
+                    );
+                    status.set_icon_name(Some("emblem-ok-symbolic"));
+                }
+                "daemon://transfer-error" | "daemon://session-error" => {
+                    progress.set_visible(false);
+                    idle(&status, "Something went wrong", "The transfer didn't finish");
+                }
+                _ => {}
+            }
+        }
+    });
+
     window.present();
 }
 
-/// Dev-only daemon locations (a Flatpak bundles the daemon at a known path, which
-/// `resolve_daemon_binary` finds via `bin/bolt-daemon` / PATH).
-fn dev_daemon_paths() -> Vec<PathBuf> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../bolt-daemon/target");
-    vec![
-        root.join("release/bolt-daemon"),
-        root.join("debug/bolt-daemon"),
-    ]
+/// Reset the main view to an idle status message.
+fn idle(status: &adw::StatusPage, title: &str, description: &str) {
+    status.set_title(title);
+    status.set_description(Some(description));
+    status.set_icon_name(Some("network-wireless-symbolic"));
 }
 
-/// Render a payload as a short one-line summary for the event feed.
-fn compact(payload: &serde_json::Value) -> String {
-    let s = payload.to_string();
-    if s.len() > 120 {
-        format!("{}…", &s[..119])
-    } else {
-        s
+/// Prompt to confirm a pairing request — the user verifies the SAS matches the
+/// code shown on the other device, then accepts or declines.
+fn show_pairing_dialog(
+    window: &adw::ApplicationWindow,
+    bridge: &Arc<IpcBridgeCore>,
+    req: PairingRequestPayload,
+) {
+    let body = format!(
+        "{} wants to connect.\n\nConfirm this code matches on both screens:\n\n{}",
+        req.remote_device_name, req.sas
+    );
+    let dialog = adw::AlertDialog::new(Some("Connection request"), Some(&body));
+    dialog.add_response("decline", "Decline");
+    dialog.add_response("accept", "Connect");
+    dialog.set_response_appearance("accept", adw::ResponseAppearance::Suggested);
+    dialog.set_response_appearance("decline", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("accept"));
+    dialog.set_close_response("decline");
+
+    let bridge = Arc::clone(bridge);
+    dialog.connect_response(None, move |_, response| {
+        let decision = if response == "accept" {
+            Decision::AllowOnce
+        } else {
+            Decision::DenyOnce
+        };
+        let payload = serde_json::to_value(PairingDecisionPayload {
+            request_id: req.request_id.clone(),
+            decision,
+            note: None,
+        })
+        .unwrap_or_default();
+        send(&bridge, "pairing.decision", payload);
+    });
+    dialog.present(Some(window));
+}
+
+/// Prompt to accept an incoming file.
+fn show_transfer_dialog(
+    window: &adw::ApplicationWindow,
+    bridge: &Arc<IpcBridgeCore>,
+    req: TransferIncomingRequestPayload,
+) {
+    let body = format!(
+        "{} wants to send you:\n\n{}  ({})",
+        req.from_device_name,
+        req.file_name,
+        human_size(req.file_size_bytes)
+    );
+    let dialog = adw::AlertDialog::new(Some("Incoming file"), Some(&body));
+    dialog.add_response("decline", "Decline");
+    dialog.add_response("accept", "Accept");
+    dialog.set_response_appearance("accept", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("accept"));
+    dialog.set_close_response("decline");
+
+    let bridge = Arc::clone(bridge);
+    dialog.connect_response(None, move |_, response| {
+        let decision = if response == "accept" {
+            Decision::AllowOnce
+        } else {
+            Decision::DenyOnce
+        };
+        let payload = serde_json::to_value(TransferIncomingDecisionPayload {
+            request_id: req.request_id.clone(),
+            decision,
+            note: None,
+        })
+        .unwrap_or_default();
+        send(&bridge, "transfer.incoming.decision", payload);
+    });
+    dialog.present(Some(window));
+}
+
+/// Send a decision to the daemon over the bridge.
+fn send(bridge: &Arc<IpcBridgeCore>, msg_type: &str, payload: serde_json::Value) {
+    if let Err(e) = bridge.send_decision(IpcMessage::new_decision(msg_type, payload)) {
+        eprintln!("[localbolt] failed to send {msg_type}: {e}");
     }
+}
+
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", UNITS[0])
+    } else {
+        format!("{size:.1} {}", UNITS[unit])
+    }
+}
+
+/// Dev-only daemon locations (a Flatpak bundles the daemon on `PATH`).
+fn dev_daemon_paths() -> Vec<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../bolt-daemon/target");
+    vec![root.join("release/bolt-daemon"), root.join("debug/bolt-daemon")]
 }
