@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## fix(security): EA9 — contain interior-NUL peer metadata at the FFI boundary — 2026-07-14
+
+A malformed or malicious rendezvous peer whose `peer_code`, `device_name`, or
+`device_type` carried an interior NUL byte aborted the whole app: the FFI boundary
+in `native/shared/src/signaling.rs` called `CString::new(...).unwrap()` on those
+untrusted fields (rendezvous is untrusted by design), a zero-interaction remote
+DoS. Each field now mirrors the existing `wt_url` handling and maps a NUL-bearing
+value to a null pointer (the Swift host already null-coalesces it to ""), so a
+malformed peer is skipped instead of crashing. Two adversarial tests cover NUL in
+`device_name` and `peer_code`. Audit: EA9 (FFI-PANIC-SAFETY-1).
+
+---
+
 ## fix(mac): order-aware WT lifecycle parsing + initiator session handling — 2026-07-03
 
 Recovered May-era working-tree progress (found uncommitted during the

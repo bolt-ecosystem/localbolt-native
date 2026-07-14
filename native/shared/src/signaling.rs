@@ -211,9 +211,19 @@ pub unsafe extern "C" fn bolt_signaling_get_peer(
         .map(|cs| cs.into_raw())
         .unwrap_or(std::ptr::null_mut());
     Box::into_raw(Box::new(BoltPeer {
-        peer_code: CString::new(peer.peer_code.as_str()).unwrap().into_raw(),
-        device_name: CString::new(peer.device_name.as_str()).unwrap().into_raw(),
-        device_type: CString::new(peer.device_type.as_str()).unwrap().into_raw(),
+        // EA9: peer_code/device_name/device_type come from untrusted rendezvous JSON.
+        // An interior NUL made CString::new().unwrap() abort the whole app (zero-
+        // interaction remote DoS). Mirror the wt_url handling above: a malformed field
+        // becomes a null pointer (the Swift host null-coalesces it) instead of aborting.
+        peer_code: CString::new(peer.peer_code.as_str())
+            .map(|cs| cs.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
+        device_name: CString::new(peer.device_name.as_str())
+            .map(|cs| cs.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
+        device_type: CString::new(peer.device_type.as_str())
+            .map(|cs| cs.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
         wt_url: wt_url_ptr,
         wt_cert_hash: wt_hash_ptr,
     }))
@@ -340,9 +350,18 @@ mod tests {
             .map(|cs| cs.into_raw())
             .unwrap_or(std::ptr::null_mut());
         Box::into_raw(Box::new(BoltPeer {
-            peer_code: CString::new(peer.peer_code.as_str()).unwrap().into_raw(),
-            device_name: CString::new(peer.device_name.as_str()).unwrap().into_raw(),
-            device_type: CString::new(peer.device_type.as_str()).unwrap().into_raw(),
+            // EA9: mirror the production bolt_signaling_get_peer boundary handling
+            // (null pointer on a NUL-bearing field) so the adversarial tests below
+            // exercise the real fixed behavior instead of aborting in the harness.
+            peer_code: CString::new(peer.peer_code.as_str())
+                .map(|cs| cs.into_raw())
+                .unwrap_or(std::ptr::null_mut()),
+            device_name: CString::new(peer.device_name.as_str())
+                .map(|cs| cs.into_raw())
+                .unwrap_or(std::ptr::null_mut()),
+            device_type: CString::new(peer.device_type.as_str())
+                .map(|cs| cs.into_raw())
+                .unwrap_or(std::ptr::null_mut()),
             wt_url: wt_url_ptr,
             wt_cert_hash: wt_hash_ptr,
         }))
@@ -425,5 +444,48 @@ mod tests {
         let peer: PeerInfo = serde_json::from_str(json).unwrap();
         assert_eq!(peer.wt_url.as_deref(), Some("https://10.0.0.1:9871"));
         assert_eq!(peer.wt_cert_hash.as_deref(), Some("deadbeef"));
+    }
+
+    #[test]
+    fn bolt_peer_with_nul_in_device_name_yields_null_ptr_no_abort() {
+        // EA9 adversarial: rendezvous is untrusted. Peer metadata carrying an interior
+        // NUL byte must NOT abort the process at the FFI boundary. The offending field
+        // maps to a null pointer (mirroring wt_url); the Swift host null-coalesces it to
+        // "" (BoltBridge.swift get-peer loop). Clean fields still convert.
+        let peer = PeerInfo {
+            peer_code: "GOODCODE".into(),
+            device_name: "Evil\0Name".into(),
+            device_type: "browser".into(),
+            wt_url: None,
+            wt_cert_hash: None,
+        };
+        let ptr = make_bolt_peer(&peer);
+        unsafe {
+            let p = &*ptr;
+            assert!(p.device_name.is_null(), "NUL device_name must map to null ptr");
+            assert!(!p.peer_code.is_null(), "clean peer_code must convert");
+            assert!(!p.device_type.is_null(), "clean device_type must convert");
+            bolt_peer_free(ptr); // must not abort on the null field
+        }
+    }
+
+    #[test]
+    fn bolt_peer_with_nul_in_peer_code_yields_null_ptr() {
+        // The identity field is equally attacker-controlled; a NUL there must be
+        // contained, not abort the app.
+        let peer = PeerInfo {
+            peer_code: "BAD\0CODE".into(),
+            device_name: "Phone".into(),
+            device_type: "phone".into(),
+            wt_url: None,
+            wt_cert_hash: None,
+        };
+        let ptr = make_bolt_peer(&peer);
+        unsafe {
+            let p = &*ptr;
+            assert!(p.peer_code.is_null(), "NUL peer_code must map to null ptr");
+            assert!(!p.device_name.is_null(), "clean device_name must convert");
+            bolt_peer_free(ptr);
+        }
     }
 }
