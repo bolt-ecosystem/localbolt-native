@@ -43,6 +43,33 @@ pub extern "C" fn bolt_daemon_find_binary() -> *mut c_char {
     std::ptr::null_mut()
 }
 
+/// Build the argv for spawning bolt-daemon. Extracted so the spawn arguments — in
+/// particular the pairing policy — are unit-testable without launching a process.
+///
+/// `--pairing-policy ask`: now that the daemon trust path fails closed (EA2 legacy
+/// closure, EA3 WT gate, item-2 fail-closed `trust_config`), the native app must NOT
+/// launch with `allow`, which accepted any LAN peer with no prompt and no SAS. `ask`
+/// denies unpinned inbound by default. Authorization hardening only — this does not add
+/// an interactive prompt or any "verified"/pin behavior (that is EA1/EA4).
+fn daemon_spawn_args<'a>(
+    ws_listen: &'a str,
+    socket_path: &'a str,
+    data_dir: &'a str,
+) -> [&'a str; 10] {
+    [
+        "--mode",
+        "ws-endpoint",
+        "--ws-listen",
+        ws_listen,
+        "--socket-path",
+        socket_path,
+        "--data-dir",
+        data_dir,
+        "--pairing-policy",
+        "ask",
+    ]
+}
+
 /// Create and start a daemon process.
 /// `daemon_bin` — path to bolt-daemon binary (C string)
 /// `ws_port` — port for WS endpoint (0 = auto-assign based on PID)
@@ -83,13 +110,7 @@ pub unsafe extern "C" fn bolt_daemon_start(
     }
 
     let mut child = match Command::new(bin_path)
-        .args(&[
-            "--mode", "ws-endpoint",
-            "--ws-listen", &ws_listen,
-            "--socket-path", &socket_path,
-            "--data-dir", &data_dir,
-            "--pairing-policy", "allow",
-        ])
+        .args(daemon_spawn_args(&ws_listen, &socket_path, &data_dir))
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
@@ -470,4 +491,29 @@ pub unsafe extern "C" fn bolt_daemon_stop(handle: *mut BoltDaemon) {
     // Clean up temp files
     let _ = std::fs::remove_dir_all(&daemon.data_dir);
     eprintln!("[NATIVE_BRIDGE] daemon stopped: pid={}", daemon.pid);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The native app must launch bolt-daemon with the fail-closed `ask` pairing
+    /// policy, never `allow` (which accepted any LAN peer with no prompt / no SAS).
+    #[test]
+    fn spawn_args_use_ask_not_allow() {
+        let args = daemon_spawn_args("0.0.0.0:9100", "/tmp/x.sock", "/tmp/data");
+        let pos = args
+            .iter()
+            .position(|a| *a == "--pairing-policy")
+            .expect("spawn args must set --pairing-policy");
+        assert_eq!(
+            args[pos + 1],
+            "ask",
+            "native app must launch the daemon with `ask`, not `allow`"
+        );
+        assert!(
+            !args.contains(&"allow"),
+            "no spawn arg may be `allow` (fail-closed default only)"
+        );
+    }
 }

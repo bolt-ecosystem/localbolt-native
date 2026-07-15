@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## fix(security): EA4 (near-term) — launch bolt-daemon with `ask`, not `allow` — 2026-07-14
+
+The native app spawned bolt-daemon with `--pairing-policy allow` on a `0.0.0.0` WS
+listener, so any LAN host could write files into `~/Downloads` with no prompt and no
+SAS. Now that the daemon trust path fails closed (EA2 legacy closure, EA3 WebTransport
+gate, item-2 fail-closed `trust_config`), the app launches with `--pairing-policy ask`,
+which denies unpinned inbound by default. Authorization hardening only: this does NOT
+add an interactive prompt or any "verified"/pin behavior (that is the full EA4 +
+EA1 workstream, still design-locked). The spawn argv is extracted into a testable
+`daemon_spawn_args` helper; a unit test asserts the args carry `ask` and never `allow`
+(mutation-verified). Bridge tests 22/22. Audit: EA4 (NATIVE-PAIRING-ASK-1), near-term step.
+
+---
+
 ## fix(security): EA9 — contain interior-NUL peer metadata at the FFI boundary — 2026-07-14
 
 A malformed or malicious rendezvous peer whose `peer_code`, `device_name`, or
