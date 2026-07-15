@@ -4,6 +4,30 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## fix(security): item-6 — honest pre-EA1 verification (no false "Verified", no persisted/reconnect trust) — 2026-07-15
+
+The macOS shell persisted a `verified` pin from the user tapping "I Verified" after eyeballing the
+SAS, showed a green "Verified" shield, and auto-asserted `.verified` on reconnect (silently skipping
+the SAS). None of that is cryptographic device verification (no EA1/PAKE exists yet), so it overstated
+assurance and contradicted the daemon's own stated invariant. Made the shell honest **without**
+renaming the internal `.verified` state:
+- `PinStore` is now key-continuity only: `markVerified` persists nothing; `isVerified` always returns
+  false (a stored `verified: true` — including old on-disk pins — is never trusted, so no reconnect can
+  skip the SAS); mismatch detection keys on any pinned device name rather than only "verified" ones.
+- Removed the reconnect auto-verify branches in `BoltBridge` (`session-sas`) and `LocalBoltApp`
+  (`applyWtVerificationCode`): every session starts unverified and the user re-reviews the SAS.
+  `IpcManager.markVerified()` records session-scoped approval only (no persist).
+- Wording: "Verified" badge → "Approved" (approval checkmark, not a security shield); "I Verified"
+  button → "Approve this session"; SAS prompt "Verify this code matches" → "Compare this code with";
+  mismatch alert "last verified" → "last seen".
+
+Approval/authorization and TOFU mismatch handling are unchanged. Added a `LocalBoltTests` target with
+`PinStore` tests (approval not persisted; legacy `verified:true` ignored; mismatch on any pin). The app
+compiles + links (`swift build`); XCTest execution requires Xcode (dev/CI) and was not runnable in the
+Command-Line-Tools-only audit environment. Audit: item-6 (no verified/pin semantics pre-EA1).
+
+---
+
 ## fix(security): EA8 (native keydir) — persist identity/trust to the platform data dir — 2026-07-14
 
 The daemon's identity key + TOFU trust store lived in a predictable

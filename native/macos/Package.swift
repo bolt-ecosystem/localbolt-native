@@ -31,5 +31,22 @@ let package = Package(
                 .linkedFramework("CoreFoundation"),
             ]
         ),
+        // Unit tests for pure/model logic (e.g. the TOFU PinStore). `@testable import`
+        // pulls in the whole app module, which references the Rust FFI, so the test
+        // bundle re-declares the same link settings as the app target.
+        .testTarget(
+            name: "LocalBoltTests",
+            dependencies: ["LocalBolt"],
+            path: "Tests/LocalBoltTests",
+            linkerSettings: [
+                .unsafeFlags([
+                    "../../native/shared/target/release/libbolt_native_bridge.a",
+                ]),
+                .linkedLibrary("System"),
+                .linkedLibrary("resolv"),
+                .linkedFramework("Security"),
+                .linkedFramework("CoreFoundation"),
+            ]
+        ),
     ]
 )

@@ -466,15 +466,19 @@ struct PeerSession {
     var identityKeyB64: String?
 }
 
-// ── TOFU Pin Store (persistent identity verification) ─────
+// ── TOFU Pin Store (key-continuity only, pre-EA1) ─────
 
-/// Persists verified peer identity keys to disk (JSON).
-/// Implements PROTOCOL.md §2: "Known key match: proceed without user interaction."
+/// Persists peer identity keys to disk (JSON) for TOFU key-continuity / mismatch
+/// detection. Item-6 / pre-EA1: it does NOT persist a "verified" flag and never asserts
+/// a session is verified — real device verification requires EA1/PAKE, which does not
+/// exist yet. The `PinEntry.verified` field is vestigial (see below).
 final class PinStore {
     private let fileURL: URL
     private var pins: [String: PinEntry] = [:]
 
     struct PinEntry: Codable {
+        /// Item-6 / pre-EA1: legacy field, no longer trusted. Nothing writes `true`
+        /// anymore and `isVerified` ignores it; kept only for on-disk shape compatibility.
         var verified: Bool
         var firstSeen: Date
         var deviceName: String?
@@ -487,34 +491,34 @@ final class PinStore {
         load()
     }
 
-    /// Check if an identity key is already pinned and verified.
+    /// Item-6 / pre-EA1: always false. No persisted `verified` flag may be treated as
+    /// proof of device identity (no EA1/PAKE verification exists), so a stored value —
+    /// including one written before this change — is never surfaced as verified.
     func isVerified(identityKeyB64: String) -> Bool {
-        pins[identityKeyB64]?.verified == true
+        return false
     }
 
-    /// Pin an identity key (unverified). No-op if already pinned.
+    /// Pin an identity key for key-continuity. No-op if already pinned.
     func pin(identityKeyB64: String, deviceName: String? = nil) {
         guard pins[identityKeyB64] == nil else { return }
         pins[identityKeyB64] = PinEntry(verified: false, firstSeen: Date(), deviceName: deviceName)
         save()
     }
 
-    /// Mark an already-pinned identity key as verified.
+    /// Item-6 / pre-EA1: no-op. Session approval is NOT persisted as a verified pin —
+    /// there is no cryptographic device verification yet, so nothing may write
+    /// `verified: true`. Kept for call-site compatibility; deliberately persists nothing.
     func markVerified(identityKeyB64: String, deviceName: String? = nil) {
-        if var entry = pins[identityKeyB64] {
-            entry.verified = true
-            if let name = deviceName { entry.deviceName = name }
-            pins[identityKeyB64] = entry
-        } else {
-            pins[identityKeyB64] = PinEntry(verified: true, firstSeen: Date(), deviceName: deviceName)
-        }
-        save()
+        // intentionally no persistence pre-EA1
     }
 
-    /// M7: Check if a device name was previously verified with a different identity key.
+    /// M7: Check if a device name was previously pinned with a different identity key.
     /// Returns the old identity key (truncated) if mismatch detected, nil otherwise.
+    /// Item-6: keys on ANY previously-pinned device name (TOFU key-continuity), not just
+    /// "verified" ones — pins are no longer marked verified, so mismatch detection must
+    /// not depend on that flag.
     func checkMismatch(identityKeyB64: String, deviceName: String) -> String? {
-        for (key, entry) in pins where entry.verified && entry.deviceName == deviceName && key != identityKeyB64 {
+        for (key, entry) in pins where entry.deviceName == deviceName && key != identityKeyB64 {
             return String(key.prefix(12)) + "..."
         }
         return nil
@@ -779,14 +783,13 @@ final class IpcManager {
         pendingRequest = nil
     }
 
-    /// Mark the current session as verified (user confirmed SAS match).
-    /// Persists to TOFU pin store so future reconnects skip SAS.
+    /// Approve the current session (user confirmed the SAS match).
+    /// Item-6 / pre-EA1: session-scoped ONLY. This is NOT cryptographic device
+    /// verification and is NOT persisted, so it does not survive a reconnect — the SAS
+    /// must be reviewed again next session. The internal `.verified` case name is kept.
     func markVerified() {
         connectedPeer?.trust = .verified
-        if let key = connectedPeer?.identityKeyB64 {
-            pinStore?.markVerified(identityKeyB64: key, deviceName: connectedPeer?.deviceName)
-            print("[TOFU] identity pinned as verified: \(key.prefix(8))...")
-        }
+        print("[TOFU] session approved by user (session-scoped, not persisted)")
     }
 
     /// Clear transfer state back to idle.
@@ -894,14 +897,11 @@ final class IpcManager {
                         connectedPeer?.identityKeyB64 = key
                         print("[TOFU] IDENTITY MISMATCH for \(name) — old key: \(oldKey)")
                     }
-                    // TOFU: check pin store for previously verified identity
-                    else if let key = identityKey, pinStore?.isVerified(identityKeyB64: key) == true {
-                        // Known verified peer — skip SAS (PROTOCOL.md §2)
-                        connectedPeer?.trust = .verified
-                        print("[TOFU] known verified identity — SAS skipped")
-                    } else {
+                    // Item-6 / pre-EA1: NO reconnect auto-trust. A known identity key is
+                    // never silently promoted to verified from a stored pin — the user
+                    // reviews the SAS every session. Pin (unverified) for key-continuity.
+                    else {
                         connectedPeer?.trust = .unverified(sas: sas)
-                        // Pin the identity key (unverified) for future reference
                         if let key = identityKey {
                             connectedPeer?.identityKeyB64 = key
                             pinStore?.pin(identityKeyB64: key, deviceName: peerName)

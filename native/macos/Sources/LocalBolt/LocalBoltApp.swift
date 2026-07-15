@@ -282,15 +282,10 @@ struct ContentView: View {
 
     private func applyWtVerificationCode(_ sas: String?) {
         guard let sas, ipc.sessionPhase == .connected else { return }
-        // Check TOFU pin store first
-        if let key = ipc.connectedPeer?.identityKeyB64,
-           ipc.pinStore?.isVerified(identityKeyB64: key) == true {
-            ipc.connectedPeer?.trust = .verified
-            print("[WT-DETECT] Known verified identity — SAS skipped")
-        } else {
-            ipc.connectedPeer?.trust = .unverified(sas: sas)
-            print("[WT-DETECT] SAS from daemon stderr: \(sas)")
-        }
+        // Item-6 / pre-EA1: no reconnect auto-trust — always surface the SAS as
+        // unverified for user review; a stored pin never skips it.
+        ipc.connectedPeer?.trust = .unverified(sas: sas)
+        print("[WT-DETECT] SAS from daemon stderr: \(sas)")
     }
 
     // MARK: - Startup
@@ -759,7 +754,7 @@ struct ContentView: View {
                             .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.red)
                     }
-                    Text("The identity key for \"\(name)\" has changed since it was last verified.")
+                    Text("The identity key for \"\(name)\" has changed since it was last seen.")
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.6))
                         .multilineTextAlignment(.center)
@@ -788,7 +783,7 @@ struct ContentView: View {
             if case .unverified(let sas) = peer.trust {
                 Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
                 VStack(spacing: 10) {
-                    Text("Verify this code matches on the other device:")
+                    Text("Compare this code with the other device:")
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.4))
                     Text(sas)
@@ -812,9 +807,9 @@ struct ContentView: View {
                         .tint(.red.opacity(0.8))
                         .controlSize(.regular)
 
-                        // S3: Label aligned with web — confirms user action, not code state
+                        // Item-6: session-scoped approval, not a verification claim.
                         Button(action: { ipc.markVerified() }) {
-                            Text("I Verified")
+                            Text("Approve this session")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -837,11 +832,14 @@ struct ContentView: View {
     private func trustLabel(peer: PeerSession) -> some View {
         switch peer.trust {
         case .verified:
+            // Item-6 / pre-EA1: user approved this session after comparing the SAS. Not
+            // cryptographic device verification, so the badge says "Approved", not
+            // "Verified", and uses an approval check rather than a security shield.
             HStack(spacing: 4) {
-                Image(systemName: "checkmark.shield.fill")
+                Image(systemName: "checkmark.circle")
                     .font(.system(size: 10))
                     .foregroundColor(neon.opacity(0.7))
-                Text("Verified")
+                Text("Approved")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(neon.opacity(0.7))
             }
