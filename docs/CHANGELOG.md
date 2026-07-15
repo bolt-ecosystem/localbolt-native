@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Newest first.
 
 ---
 
+## fix(security): EA8 (native keydir) — persist identity/trust to the platform data dir — 2026-07-14
+
+The daemon's identity key + TOFU trust store lived in a predictable
+`/tmp/bolt-native-<pid>` directory created fresh on every launch, so identity
+regenerated each run and TOFU pins never persisted (degrading MITM protection), and a
+world-adjacent `/tmp` path is a weak home for key material. The native bridge now points
+`--data-dir` at the platform default (`bolt_app_core::platform::default_data_dir()`, e.g.
+`~/Library/Application Support/LocalBolt/daemon` on macOS), a stable per-user location.
+Because that directory is now persistent, `bolt_daemon_stop` no longer deletes it (which
+would have wiped identity + pins on every stop); only the ephemeral IPC socket is
+removed. A unit test asserts the data dir is the platform default and never
+`/tmp/bolt-native-<pid>` (mutation-verified). The IPC socket stays under `/tmp` (it is
+ephemeral, and a socket path in the data dir can exceed the AF_UNIX sun_path limit on
+macOS). Bridge tests 23/23. Audit: EA8 (NATIVE-KEYDIR-1), native-app portion; the
+`bolt-daemon` identity_store hardening (symlink/uid/O_EXCL) is tracked separately.
+
+---
+
 ## fix(security): EA4 (near-term) — launch bolt-daemon with `ask`, not `allow` — 2026-07-14
 
 The native app spawned bolt-daemon with `--pairing-policy allow` on a `0.0.0.0` WS

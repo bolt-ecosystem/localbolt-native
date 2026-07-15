@@ -70,6 +70,17 @@ fn daemon_spawn_args<'a>(
     ]
 }
 
+/// The daemon data directory: the persistent, platform-default location for the
+/// identity key + TOFU trust store. EA8: replaces the predictable, world-adjacent
+/// `/tmp/bolt-native-<pid>` dir that regenerated identity on every launch (degrading
+/// TOFU/MITM protection). Persisting to the platform default lets identity + pins
+/// survive restarts. NOTE: the `bolt-daemon` identity_store hardening (reject symlink
+/// parent, verify uid, O_EXCL 0600) is a separate EA8 sub-item in the bolt-daemon repo,
+/// out of this native-app change.
+fn daemon_data_dir() -> String {
+    bolt_app_core::platform::default_data_dir()
+}
+
 /// Create and start a daemon process.
 /// `daemon_bin` — path to bolt-daemon binary (C string)
 /// `ws_port` — port for WS endpoint (0 = auto-assign based on PID)
@@ -97,7 +108,9 @@ pub unsafe extern "C" fn bolt_daemon_start(
     };
 
     let pid = std::process::id();
-    let data_dir = format!("/tmp/bolt-native-{pid}");
+    let data_dir = daemon_data_dir();
+    // The IPC socket stays under /tmp: it is ephemeral, and a socket path inside the
+    // platform data dir can exceed the AF_UNIX sun_path limit (~104 bytes on macOS).
     let socket_path = format!("/tmp/bolt-native-{pid}.sock");
     let ws_listen = format!("0.0.0.0:{port}");
 
@@ -488,8 +501,10 @@ pub unsafe extern "C" fn bolt_daemon_stop(handle: *mut BoltDaemon) {
             let _ = child.wait();
         }
     }
-    // Clean up temp files
-    let _ = std::fs::remove_dir_all(&daemon.data_dir);
+    // EA8: data_dir is now the PERSISTENT platform identity + trust store — do NOT
+    // delete it on stop (that would regenerate identity every launch and wipe TOFU
+    // pins). Only the ephemeral IPC socket is cleaned up here.
+    let _ = std::fs::remove_file(&daemon.socket_path);
     eprintln!("[NATIVE_BRIDGE] daemon stopped: pid={}", daemon.pid);
 }
 
@@ -514,6 +529,22 @@ mod tests {
         assert!(
             !args.contains(&"allow"),
             "no spawn arg may be `allow` (fail-closed default only)"
+        );
+    }
+
+    /// EA8: the identity + trust store must live at the persistent platform default,
+    /// never the predictable `/tmp/bolt-native-<pid>` path it used before.
+    #[test]
+    fn data_dir_is_platform_default_not_tmp() {
+        let dir = daemon_data_dir();
+        assert!(
+            !dir.starts_with("/tmp/bolt-native-"),
+            "identity/trust dir must not be a predictable /tmp/bolt-native-<pid> path, got: {dir}"
+        );
+        assert_eq!(
+            dir,
+            bolt_app_core::platform::default_data_dir(),
+            "identity/trust dir must be the platform default data dir"
         );
     }
 }
