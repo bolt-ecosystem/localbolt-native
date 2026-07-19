@@ -33,8 +33,8 @@
 |---------|--------|-----|------|
 | LocalBolt v1.0.0 | **Draft** | v1.0.0 | 2026-02-19 |
 
-**Stale.** Draft only, from Tauri era. Current code is at `localbolt-app-v1.2.30`.
-No published release exists for the SwiftUI native app.
+**Stale.** Draft only. Current native releases are tracked by the
+`localbolt-app-v2.*` tag series and the SwiftUI native app release artifacts.
 
 ### Site References (localbolt.app)
 

@@ -1,6 +1,6 @@
 //! LocalBolt Signaling Server library.
 //!
-//! Provides a reusable [`SignalingServer`] that can be embedded inside a Tauri
+//! Provides a reusable [`SignalingServer`] that can be embedded inside a native
 //! application or run as a standalone binary. The server groups peers by IP
 //! address for local-network device discovery and relays WebRTC signaling
 //! messages between them.

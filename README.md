@@ -67,7 +67,7 @@ This is an **open-source** project. Free to use, build, and modify.
 
 ## Historical Note
 
-This repository previously contained a Tauri v2 cross-platform implementation (last Tauri release: v1.2.24). That implementation is frozen. The current native app is SwiftUI + Rust, macOS-only. The `web/` and `src-tauri/` directories in this repo are archived Tauri-era code and are not part of the current build.
+This repository previously contained a cross-platform desktop implementation. That path has been removed from the active tree. The current native app is SwiftUI + Rust, macOS-only.
 
 ## License
 

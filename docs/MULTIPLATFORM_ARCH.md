@@ -9,7 +9,7 @@
 
 LocalBolt Native uses platform-native shells over shared Rust core/daemon authority.
 The current macOS app is a SwiftUI shell with a Rust FFI bridge and bundled bolt-daemon
-sidecar. Tauri and egui/bolt-ui are retired historical paths, not the forward product
+sidecar. Retired cross-platform desktop shells are not part of the active product
 architecture.
 
 **Anti-pattern:** Do not introduce a cross-platform UI shell as the default product
@@ -29,8 +29,6 @@ localbolt-app/
 │   │   └── gtk/            # Phase 2: GTK4/libadwaita shell (future, TBD)
 │   ├── windows/            # Future: platform-native shell (TBD)
 │   └── ios/                # Future: SwiftUI iOS shell
-├── src-tauri/              # FROZEN — Tauri v2 historical code
-├── web/                    # FROZEN — Tauri-era web frontend
 ├── signal/                 # Vendored rendezvous subtree
 ├── scripts/
 ├── docs/
@@ -110,8 +108,7 @@ Rust-native shells (CLI, GTK4-rs) depend on `bolt-app-core` directly — no FFI 
 
 ## Constraints
 
-- No Tauri revival
-- No egui/bolt-ui revival as a product shell
+- No retired cross-platform desktop shell revival
 - No new repo for Linux CLI (lives in localbolt-app)
 - No new repo for iOS/Android unless governance explicitly approves it
 - Platform-native shells are the forward direction

@@ -4,7 +4,7 @@ Roadmap, not status. Current build state lives in the ecosystem journal.
 
 ## Architecture (decided 2026-07-03)
 
-**Rust core + a thin native shell per platform** — no web/Tauri wrapper. Each shell talks
+**Rust core + a thin native shell per platform** — no web wrapper. Each shell talks
 to the shared Rust core (`bolt-daemon` + `bolt_native_bridge`), the same pattern the macOS
 SwiftUI app already uses. Priority is native quality over speed ("go slow").
 

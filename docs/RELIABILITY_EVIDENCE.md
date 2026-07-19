@@ -54,9 +54,9 @@ Added `std::panic::catch_unwind()` around signaling server thread. Panic is caug
 
 ---
 
-## 5. 30-Second Timeout Issue (Cross-Device bolt-ui)
+## 5. 30-Second Timeout Issue (Cross-Device Daemon Path)
 
-The 30-second disconnect observed during cross-device bolt-ui testing is **NOT a localbolt-app issue**. It affects daemon-to-daemon rendezvous connections where the phase timeout covers the entire session lifecycle. localbolt-app uses a different architecture:
+The 30-second disconnect observed during cross-device daemon testing is **NOT a localbolt-app issue**. It affects daemon-to-daemon rendezvous connections where the phase timeout covers the entire session lifecycle. localbolt-app uses a different architecture:
 - Web UI manages WebRTC connections through the SDK
 - Daemon acts as local answerer for IPC events only
 - No phase timeout applies to web-initiated connections
@@ -93,7 +93,7 @@ This is a daemon architecture limitation that requires a focused N-STREAM timeou
 ## 7. Test Results
 
 ```
-Rust (src-tauri): 86 passed, 0 failed
+Rust native app core: 86 passed, 0 failed
 Web (cbtr3):     10 passed, 0 failed
 Total:           96 passed, 0 failed
 ```

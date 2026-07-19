@@ -1,104 +1,33 @@
-# LocalBolt App — Roadmap
+# LocalBolt Native — Roadmap
 
-> **SUPERSEDED (2026-04-12).** This roadmap was written for the Tauri v2 implementation (2026-02-20).
-> The Tauri path is retired. The current native app is **SwiftUI + Rust FFI + bolt-daemon sidecar** (macOS-only, v2.0.0).
-> Items referencing Tauri updater, Tauri notifications, or Tauri v2 mobile builds are no longer applicable.
-> This document is preserved for historical context.
+**Status:** Current
 
-**Date:** 2026-02-20 (historical — Tauri era)
+## Product Direction
 
----
+LocalBolt Native uses shared Rust core services with thin platform-native
+wrappers. The macOS app is the current shipping native shell:
 
-## Stability Work
+- `native/macos` — SwiftUI app
+- `native/shared` — Rust C-ABI bridge
+- `signal` — vendored rendezvous subtree
+- bundled `bolt-daemon` sidecar for session and transport orchestration
 
-### S1. Add web frontend tests
-- Port test suite from localbolt (shared codebase)
-- Add Vitest configuration to web/
-- Target 80% coverage on shared components
+## Near-Term Work
 
-### S2. SDK migration
-- Replace inline TweetNaCl with @the9ines/bolt-core
-- Validate with conformance test vectors
-- **Depends on:** bolt-core-sdk npm + crate publish
+1. Keep the macOS native shell buildable and test-covered.
+2. Keep daemon/bridge contracts synced with `bolt-daemon`.
+3. Keep public security wording aligned with the current trust model.
+4. Prepare EA1 materials for external cryptographer/formal-methods review.
 
-### S3. Subtree maintenance
-- Document subtree pull procedure
-- Verify signal/ stays in sync with bolt-rendezvous
+## Later Work
 
----
+1. Signing and notarization.
+2. Auto-update strategy.
+3. Linux and Windows shell decisions.
+4. Mobile shell decisions after the native architecture is stable.
 
-## Infrastructure Work
+## Locked Until Review
 
-### ~~I1. Auto-update~~ (Tauri retired)
-- ~~Integrate Tauri updater plugin~~
-- ~~Configure update endpoint (GitHub Releases or custom)~~
-- ~~Silent background check, user-prompted install~~
-
-### I2. Code signing
-- Apple Developer ID signing for macOS
-- Windows Authenticode signing
-- Notarization pipeline in CI
-
-### I3. Daemon integration
-- Replace in-process signaling with bolt-daemon IPC
-- Enable background transfers (app can close, daemon continues)
-- Identity persistence via daemon key store
-- **Depends on:** bolt-daemon v1.0.0
-
----
-
-## Feature Work
-
-### ~~F1. Native notifications~~ (Tauri retired)
-- ~~Tauri notification plugin~~
-- System tray integration
-- Transfer complete / incoming request alerts
-
-### ~~F2. Mobile builds~~ (Tauri retired)
-- ~~iOS build via Tauri v2~~
-- ~~Android build via Tauri v2~~
-- ~~Platform-specific UI adjustments~~
-- ~~App store submission preparation~~
-- ~~**Depends on:** I2 (code signing), I3 (daemon)~~
-
-### F3. Directory transfer
-- Native file dialog for directory selection
-- Recursive directory send/receive
-- Preserve directory structure
-- **Depends on:** S2 (SDK migration)
-
-### F4. Bandwidth optimization
-- Adaptive chunk sizes based on connection quality
-- Optional compression before encryption
-- **Depends on:** S2 (SDK migration)
-
----
-
-## Execution Order
-
-```
-S1 (tests) ────────────────────────────────────────►
-  │
-  ▼
-S2 (SDK migration) ──► F3 (directory transfer)
-  │                         │
-  ▼                         ▼
-S3 (subtree)           F4 (bandwidth)
-
-I1 (auto-update) ──► I2 (code signing) ──► F2 (mobile)
-                                               │
-I3 (daemon) ──────────────────────────────────►│
-  │
-  ▼
-F1 (notifications)
-```
-
----
-
-## Critical Path
-
-S2 (SDK) → I3 (daemon) → F2 (mobile)
-
-Mobile builds are the long pole.
-Daemon integration is the highest-value infrastructure milestone.
-SDK migration unblocks all feature work.
+EA1 PAKE remains review-ready but not implementation-authorized. Do not add
+wire changes, app trust badges, or verified-device behavior until the outside
+review and wire-freeze gates are complete.
