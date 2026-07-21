@@ -10,20 +10,23 @@
 //! Authority: bolt-core-sdk/rust/bolt-app-core/contracts/parity_fixture.json
 
 use bolt_app_core::contracts::session_contract::{
-    is_transfer_allowed, is_valid_session_transition, is_valid_transfer_transition,
-    SessionPhase, TransferPhase, VerificationState,
-    SESSION_PHASES, TRANSFER_PHASES, VERIFICATION_STATES,
+    is_transfer_allowed, is_valid_session_transition, is_valid_transfer_transition, SessionPhase,
+    TransferPhase, VerificationState, SESSION_PHASES, TRANSFER_PHASES, VERIFICATION_STATES,
 };
 
 /// The canonical parity fixture (same file consumed by web tests).
-const FIXTURE: &str = include_str!("../../../../bolt-core-sdk/rust/bolt-app-core/contracts/parity_fixture.json");
+const FIXTURE: &str =
+    include_str!("../../../../bolt-core-sdk/rust/bolt-app-core/contracts/parity_fixture.json");
 
 #[test]
 fn fixture_session_phases_match_contract() {
     let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
     let phases: Vec<String> = doc["session_phases"]
-        .as_array().unwrap()
-        .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
     assert_eq!(phases.len(), SESSION_PHASES.len());
     for phase in &SESSION_PHASES {
         let name = serde_json::to_value(phase).unwrap();
@@ -51,11 +54,17 @@ fn fixture_session_transitions_all_legal() {
 fn fixture_session_transitions_exhaustive_illegal() {
     let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
     let legal: Vec<(SessionPhase, SessionPhase)> = doc["session_transitions_legal"]
-        .as_array().unwrap().iter().map(|pair| {
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pair| {
             let arr = pair.as_array().unwrap();
-            (serde_json::from_value(arr[0].clone()).unwrap(),
-             serde_json::from_value(arr[1].clone()).unwrap())
-        }).collect();
+            (
+                serde_json::from_value(arr[0].clone()).unwrap(),
+                serde_json::from_value(arr[1].clone()).unwrap(),
+            )
+        })
+        .collect();
 
     let mut illegal_count = 0;
     for from in &SESSION_PHASES {
@@ -93,12 +102,12 @@ fn fixture_transfer_gating_matches_policy() {
     let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
     let gating = doc["transfer_gating"].as_object().unwrap();
     for (state_s, allowed_v) in gating {
-        let state: VerificationState = serde_json::from_value(
-            serde_json::Value::String(state_s.clone())
-        ).unwrap();
+        let state: VerificationState =
+            serde_json::from_value(serde_json::Value::String(state_s.clone())).unwrap();
         let allowed = allowed_v.as_bool().unwrap();
         assert_eq!(
-            is_transfer_allowed(true, state), allowed,
+            is_transfer_allowed(true, state),
+            allowed,
             "fixture: {state_s}={allowed}, validator disagrees"
         );
         // Disconnected always blocked
@@ -110,8 +119,11 @@ fn fixture_transfer_gating_matches_policy() {
 fn fixture_verification_states_match_contract() {
     let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
     let states: Vec<String> = doc["verification_states"]
-        .as_array().unwrap()
-        .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
     assert_eq!(states.len(), VERIFICATION_STATES.len());
     for state in &VERIFICATION_STATES {
         let name = serde_json::to_value(state).unwrap();

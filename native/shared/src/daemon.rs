@@ -28,15 +28,16 @@ pub extern "C" fn bolt_daemon_find_binary() -> *mut c_char {
             .and_then(|p| p.parent().map(|d| d.join("bolt-daemon")))
             .unwrap_or_default(),
         // Ecosystem workspace paths
-        PathBuf::from(
-            std::env::var("HOME").unwrap_or_default()
-        ).join("Desktop/the9ines.com/bolt-ecosystem/bolt-daemon/target/release/bolt-daemon"),
+        PathBuf::from(std::env::var("HOME").unwrap_or_default())
+            .join("Desktop/the9ines.com/bolt-ecosystem/bolt-daemon/target/release/bolt-daemon"),
     ];
 
     for path in &search_paths {
         if path.exists() {
             if let Some(s) = path.to_str() {
-                return CString::new(s).map(|cs| cs.into_raw()).unwrap_or(std::ptr::null_mut());
+                return CString::new(s)
+                    .map(|cs| cs.into_raw())
+                    .unwrap_or(std::ptr::null_mut());
             }
         }
     }
@@ -173,12 +174,18 @@ pub unsafe extern "C" fn bolt_daemon_start(
 /// `handle` must be a valid pointer returned by `bolt_daemon_start`.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_daemon_is_running(handle: *mut BoltDaemon) -> i32 {
-    if handle.is_null() { return 0; }
+    if handle.is_null() {
+        return 0;
+    }
     let daemon = &*handle;
     let mut guard = daemon.child.lock().unwrap();
     match guard.as_mut() {
         Some(child) => {
-            if child.try_wait().ok().flatten().is_none() { 1 } else { 0 }
+            if child.try_wait().ok().flatten().is_none() {
+                1
+            } else {
+                0
+            }
         }
         None => 0,
     }
@@ -190,7 +197,9 @@ pub unsafe extern "C" fn bolt_daemon_is_running(handle: *mut BoltDaemon) -> i32 
 /// `handle` must be a valid pointer returned by `bolt_daemon_start`.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_daemon_ws_port(handle: *mut BoltDaemon) -> u16 {
-    if handle.is_null() { return 0; }
+    if handle.is_null() {
+        return 0;
+    }
     (*handle).ws_port
 }
 
@@ -200,7 +209,9 @@ pub unsafe extern "C" fn bolt_daemon_ws_port(handle: *mut BoltDaemon) -> u16 {
 /// `handle` must be a valid pointer returned by `bolt_daemon_start`.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_daemon_pid(handle: *mut BoltDaemon) -> u32 {
-    if handle.is_null() { return 0; }
+    if handle.is_null() {
+        return 0;
+    }
     (*handle).pid
 }
 
@@ -214,13 +225,17 @@ pub unsafe extern "C" fn bolt_daemon_recent_stderr(
     handle: *mut BoltDaemon,
     last_n: u32,
 ) -> *mut c_char {
-    if handle.is_null() { return std::ptr::null_mut(); }
+    if handle.is_null() {
+        return std::ptr::null_mut();
+    }
     let daemon = &*handle;
     let lines = daemon.stderr_lines.lock().unwrap();
     let n = last_n as usize;
     let start = lines.len().saturating_sub(n);
     let joined = lines[start..].join("\n");
-    CString::new(joined).map(|cs| cs.into_raw()).unwrap_or(std::ptr::null_mut())
+    CString::new(joined)
+        .map(|cs| cs.into_raw())
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// Get the daemon's IPC socket path. Caller must free with `bolt_free_string`.
@@ -229,7 +244,9 @@ pub unsafe extern "C" fn bolt_daemon_recent_stderr(
 /// `handle` must be a valid pointer returned by `bolt_daemon_start`.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_daemon_socket_path(handle: *mut BoltDaemon) -> *mut c_char {
-    if handle.is_null() { return std::ptr::null_mut(); }
+    if handle.is_null() {
+        return std::ptr::null_mut();
+    }
     let daemon = &*handle;
     CString::new(daemon.socket_path.as_str())
         .map(|cs| cs.into_raw())
@@ -242,7 +259,9 @@ pub unsafe extern "C" fn bolt_daemon_socket_path(handle: *mut BoltDaemon) -> *mu
 /// `handle` must be a valid pointer returned by `bolt_daemon_start`.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_daemon_data_dir(handle: *mut BoltDaemon) -> *mut c_char {
-    if handle.is_null() { return std::ptr::null_mut(); }
+    if handle.is_null() {
+        return std::ptr::null_mut();
+    }
     let daemon = &*handle;
     CString::new(daemon.data_dir.as_str())
         .map(|cs| cs.into_raw())
@@ -260,7 +279,9 @@ pub unsafe extern "C" fn bolt_daemon_send_file(
     handle: *mut BoltDaemon,
     file_path: *const c_char,
 ) -> i32 {
-    if handle.is_null() || file_path.is_null() { return 0; }
+    if handle.is_null() || file_path.is_null() {
+        return 0;
+    }
     let daemon = &*handle;
     let path = match CStr::from_ptr(file_path).to_str() {
         Ok(s) => s,
@@ -285,10 +306,10 @@ pub unsafe extern "C" fn bolt_daemon_send_file(
 /// # Safety
 /// `handle` must be valid.
 #[no_mangle]
-pub unsafe extern "C" fn bolt_daemon_disconnect_session(
-    handle: *mut BoltDaemon,
-) -> i32 {
-    if handle.is_null() { return 0; }
+pub unsafe extern "C" fn bolt_daemon_disconnect_session(handle: *mut BoltDaemon) -> i32 {
+    if handle.is_null() {
+        return 0;
+    }
     let daemon = &*handle;
     let signal_path = format!("{}/disconnect_session.signal", daemon.data_dir);
     match std::fs::write(&signal_path, "disconnect") {
@@ -314,7 +335,9 @@ pub unsafe extern "C" fn bolt_daemon_connect_remote(
     handle: *mut BoltDaemon,
     ws_url: *const c_char,
 ) -> i32 {
-    if handle.is_null() || ws_url.is_null() { return 0; }
+    if handle.is_null() || ws_url.is_null() {
+        return 0;
+    }
     let daemon = &*handle;
     let url = match CStr::from_ptr(ws_url).to_str() {
         Ok(s) => s,
@@ -444,10 +467,10 @@ unsafe fn optional_cstr(ptr: *const c_char) -> Result<Option<String>, std::str::
 /// # Safety
 /// `handle` must be valid.
 #[no_mangle]
-pub unsafe extern "C" fn bolt_daemon_pause_transfer(
-    handle: *mut BoltDaemon,
-) -> i32 {
-    if handle.is_null() { return 0; }
+pub unsafe extern "C" fn bolt_daemon_pause_transfer(handle: *mut BoltDaemon) -> i32 {
+    if handle.is_null() {
+        return 0;
+    }
     let daemon = &*handle;
     let signal_path = format!("{}/transfer_pause.signal", daemon.data_dir);
     match std::fs::write(&signal_path, "pause") {
@@ -468,10 +491,10 @@ pub unsafe extern "C" fn bolt_daemon_pause_transfer(
 /// # Safety
 /// `handle` must be valid.
 #[no_mangle]
-pub unsafe extern "C" fn bolt_daemon_resume_transfer(
-    handle: *mut BoltDaemon,
-) -> i32 {
-    if handle.is_null() { return 0; }
+pub unsafe extern "C" fn bolt_daemon_resume_transfer(handle: *mut BoltDaemon) -> i32 {
+    if handle.is_null() {
+        return 0;
+    }
     let daemon = &*handle;
     let signal_path = format!("{}/transfer_resume.signal", daemon.data_dir);
     match std::fs::write(&signal_path, "resume") {
@@ -493,7 +516,9 @@ pub unsafe extern "C" fn bolt_daemon_resume_transfer(
 /// After this call, `handle` is invalid and must not be used.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_daemon_stop(handle: *mut BoltDaemon) {
-    if handle.is_null() { return; }
+    if handle.is_null() {
+        return;
+    }
     let daemon = Box::from_raw(handle);
     if let Ok(mut guard) = daemon.child.lock() {
         if let Some(ref mut child) = *guard {

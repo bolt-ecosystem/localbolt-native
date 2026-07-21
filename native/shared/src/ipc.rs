@@ -61,18 +61,21 @@ pub extern "C" fn bolt_ipc_start(
         return std::ptr::null_mut();
     }
 
-    let handle = Box::new(BoltIpc {
-        bridge,
-        events,
-    });
+    let handle = Box::new(BoltIpc { bridge, events });
     Box::into_raw(handle)
 }
 
 /// Check if IPC bridge is connected. Returns 1 if connected, 0 if not.
 #[no_mangle]
 pub extern "C" fn bolt_ipc_is_connected(handle: *mut BoltIpc) -> i32 {
-    let Some(h) = (unsafe { handle.as_ref() }) else { return 0 };
-    if h.bridge.is_connected() { 1 } else { 0 }
+    let Some(h) = (unsafe { handle.as_ref() }) else {
+        return 0;
+    };
+    if h.bridge.is_connected() {
+        1
+    } else {
+        0
+    }
 }
 
 /// Drain all pending events as a newline-separated JSON string.
@@ -80,7 +83,9 @@ pub extern "C" fn bolt_ipc_is_connected(handle: *mut BoltIpc) -> i32 {
 /// Returns null if no events. Caller must free with bolt_free_string.
 #[no_mangle]
 pub extern "C" fn bolt_ipc_drain_events(handle: *mut BoltIpc) -> *mut c_char {
-    let Some(h) = (unsafe { handle.as_ref() }) else { return std::ptr::null_mut() };
+    let Some(h) = (unsafe { handle.as_ref() }) else {
+        return std::ptr::null_mut();
+    };
 
     let mut q = h.events.lock().unwrap();
     if q.is_empty() {
@@ -106,7 +111,9 @@ pub extern "C" fn bolt_ipc_send_decision(
     msg_type: *const c_char,
     payload_json: *const c_char,
 ) -> i32 {
-    let Some(h) = (unsafe { handle.as_ref() }) else { return 0 };
+    let Some(h) = (unsafe { handle.as_ref() }) else {
+        return 0;
+    };
     let msg_type = match unsafe { validate_cstr(msg_type) } {
         Some(s) => s,
         None => return 0,
@@ -138,14 +145,18 @@ pub extern "C" fn bolt_ipc_send_decision(
 /// After this call, handle is invalid.
 #[no_mangle]
 pub extern "C" fn bolt_ipc_stop(handle: *mut BoltIpc) {
-    if handle.is_null() { return; }
+    if handle.is_null() {
+        return;
+    }
     let h = unsafe { Box::from_raw(handle) };
     h.bridge.shutdown();
 }
 
 /// Helper: validate a C string pointer and convert to owned String.
 unsafe fn validate_cstr(ptr: *const c_char) -> Option<String> {
-    if ptr.is_null() { return None; }
+    if ptr.is_null() {
+        return None;
+    }
     CStr::from_ptr(ptr).to_str().ok().map(|s| s.to_string())
 }
 

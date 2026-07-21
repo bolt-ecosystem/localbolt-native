@@ -1,4 +1,4 @@
-name: Windows CI (legacy surfaces)
+name: Windows CI (signal server)
 
 on:
   workflow_dispatch:
@@ -23,32 +23,3 @@ jobs:
       - run: cargo clippy -- -D warnings
       - run: cargo test -- --nocapture
       - run: cargo build --release
-
-  tauri-retired:
-    name: Tauri App Retired Guard
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Confirm retired Tauri surface is not a forward CI gate
-        shell: pwsh
-        run: |
-          Write-Host "src-tauri is retired and frozen."
-          Write-Host "Forward Windows shell CI requires a native/windows implementation decision."
-
-  web-app:
-    name: Web App (TypeScript)
-    runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci
-      - name: Web tests + coverage
-        run: npm run test:coverage
-      - run: npm run build

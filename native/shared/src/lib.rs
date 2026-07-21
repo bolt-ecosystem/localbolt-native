@@ -66,7 +66,11 @@ pub extern "C" fn bolt_platform_ipc_path() -> *mut c_char {
 /// Probe signal server health. Returns 1 if healthy, 0 if not.
 #[no_mangle]
 pub extern "C" fn bolt_probe_signal_health() -> i32 {
-    if bolt_app_core::signal_monitor::probe_signal_health() { 1 } else { 0 }
+    if bolt_app_core::signal_monitor::probe_signal_health() {
+        1
+    } else {
+        0
+    }
 }
 
 /// Free a string returned by any bolt_ function.
@@ -122,6 +126,8 @@ mod tests {
 
     #[test]
     fn free_null_is_safe() {
-        unsafe { bolt_free_string(std::ptr::null_mut()); }
+        unsafe {
+            bolt_free_string(std::ptr::null_mut());
+        }
     }
 }

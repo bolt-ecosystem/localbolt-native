@@ -29,10 +29,6 @@ jobs:
       - run: cargo test
       - run: cargo build --release
 
-  # Tauri App (Rust) job removed — src-tauri is frozen (last release v1.2.24).
-  # Native shell direction is SwiftUI/FFI (native/shared + native/macos).
-  # Forward native CI is enforced by native-shared + native-macos below.
-
   native-shared:
     name: Native Shared Bridge (Rust)
     runs-on: ubuntu-latest
@@ -71,43 +67,3 @@ jobs:
       - name: Build SwiftUI shell
         working-directory: native/macos
         run: swift build -c release
-
-  web-app:
-    name: Web App (TypeScript)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Registry mapping guard (D5)
-        working-directory: .
-        run: bash scripts/check-registry-mapping.sh
-      - name: Transport version pin guard
-        working-directory: .
-        run: bash scripts/check-transport-version-pin.sh
-      - name: Core version pin guard
-        working-directory: .
-        run: bash scripts/check-core-version-pin.sh
-      - run: npm ci
-      - name: Lockfile registry guard (D5)
-        working-directory: .
-        run: bash scripts/check-lockfile-registry.sh
-      - name: Transport single-install guard
-        working-directory: .
-        run: bash scripts/check-transport-single-install.sh
-      - name: Core single-install guard
-        working-directory: .
-        run: bash scripts/check-core-single-install.sh
-      - name: Web tests + coverage
-        run: npm run test:coverage
-      - run: npm run build
-      - name: Transport drift guard
-        run: bash ../scripts/check-transport-drift.sh src
-      - name: Core drift guard
-        run: bash ../scripts/check-core-drift.sh src

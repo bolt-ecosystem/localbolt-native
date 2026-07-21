@@ -5,7 +5,7 @@ use std::os::raw::c_char;
 use std::sync::{Arc, Mutex};
 
 use bolt_app_core::signaling_client::{
-    self, DiscoveryEvent, Plane, PeerInfo, SignalingConfig, SignalingHandle,
+    self, DiscoveryEvent, PeerInfo, Plane, SignalingConfig, SignalingHandle,
 };
 
 /// Discovered peer (C-compatible).
@@ -77,15 +77,28 @@ pub unsafe extern "C" fn bolt_signaling_start(
     wt_cert_hash: *const c_char,
 ) -> *mut BoltSignaling {
     let local = cstr_to_string(local_url);
-    let cloud = if cloud_url.is_null() { None } else { Some(cstr_to_string(cloud_url)) };
+    let cloud = if cloud_url.is_null() {
+        None
+    } else {
+        Some(cstr_to_string(cloud_url))
+    };
     let code = cstr_to_string(peer_code);
     let name = cstr_to_string(device_name);
-    let wt_url_opt = if wt_url.is_null() { None } else { Some(cstr_to_string(wt_url)) };
-    let wt_hash_opt = if wt_cert_hash.is_null() { None } else { Some(cstr_to_string(wt_cert_hash)) };
+    let wt_url_opt = if wt_url.is_null() {
+        None
+    } else {
+        Some(cstr_to_string(wt_url))
+    };
+    let wt_hash_opt = if wt_cert_hash.is_null() {
+        None
+    } else {
+        Some(cstr_to_string(wt_cert_hash))
+    };
 
     let events: Arc<Mutex<Vec<SignalingEventInternal>>> = Arc::new(Mutex::new(Vec::new()));
     let peers: Arc<Mutex<Vec<PeerInfo>>> = Arc::new(Mutex::new(Vec::new()));
-    let connected: Arc<std::sync::atomic::AtomicBool> = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connected: Arc<std::sync::atomic::AtomicBool> =
+        Arc::new(std::sync::atomic::AtomicBool::new(false));
     let incoming_signals: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let events_cb = Arc::clone(&events);
     let peers_cb = Arc::clone(&peers);
@@ -112,7 +125,9 @@ pub unsafe extern "C" fn bolt_signaling_start(
                     // Merge, skip self
                     for peer in list {
                         if peer.peer_code != code_clone
-                            && !p.iter().any(|existing| existing.peer_code == peer.peer_code)
+                            && !p
+                                .iter()
+                                .any(|existing| existing.peer_code == peer.peer_code)
                         {
                             p.push(peer.clone());
                         }
@@ -121,33 +136,40 @@ pub unsafe extern "C" fn bolt_signaling_start(
                 DiscoveryEvent::PeerJoined(peer, plane) => {
                     if peer.peer_code != code_clone {
                         let mut p = peers_cb.lock().unwrap();
-                        if !p.iter().any(|existing| existing.peer_code == peer.peer_code) {
+                        if !p
+                            .iter()
+                            .any(|existing| existing.peer_code == peer.peer_code)
+                        {
                             p.push(peer.clone());
                         }
-                        events_cb.lock().unwrap().push(
-                            SignalingEventInternal::PeerJoined(peer.clone(), *plane)
-                        );
+                        events_cb
+                            .lock()
+                            .unwrap()
+                            .push(SignalingEventInternal::PeerJoined(peer.clone(), *plane));
                     }
                 }
                 DiscoveryEvent::PeerLeft(code, plane) => {
                     let mut p = peers_cb.lock().unwrap();
                     p.retain(|peer| peer.peer_code != *code);
-                    events_cb.lock().unwrap().push(
-                        SignalingEventInternal::PeerLeft(code.clone(), *plane)
-                    );
+                    events_cb
+                        .lock()
+                        .unwrap()
+                        .push(SignalingEventInternal::PeerLeft(code.clone(), *plane));
                 }
                 DiscoveryEvent::Connected(plane) => {
                     connected_cb.store(true, std::sync::atomic::Ordering::Relaxed);
-                    events_cb.lock().unwrap().push(
-                        SignalingEventInternal::Connected(*plane)
-                    );
+                    events_cb
+                        .lock()
+                        .unwrap()
+                        .push(SignalingEventInternal::Connected(*plane));
                 }
                 DiscoveryEvent::Disconnected(reason, plane) => {
                     // Only mark disconnected if both planes are down
                     // (one plane disconnecting shouldn't mark offline)
-                    events_cb.lock().unwrap().push(
-                        SignalingEventInternal::Disconnected(reason.clone(), *plane)
-                    );
+                    events_cb
+                        .lock()
+                        .unwrap()
+                        .push(SignalingEventInternal::Disconnected(reason.clone(), *plane));
                 }
                 DiscoveryEvent::Signal(sig, _plane) => {
                     // Queue incoming signals as JSON for the shell to process
@@ -182,7 +204,9 @@ pub unsafe extern "C" fn bolt_signaling_start(
 /// `handle` must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_signaling_peer_count(handle: *mut BoltSignaling) -> u32 {
-    if handle.is_null() { return 0; }
+    if handle.is_null() {
+        return 0;
+    }
     (*handle).peers.lock().unwrap().len() as u32
 }
 
@@ -196,17 +220,25 @@ pub unsafe extern "C" fn bolt_signaling_get_peer(
     handle: *mut BoltSignaling,
     index: u32,
 ) -> *mut BoltPeer {
-    if handle.is_null() { return std::ptr::null_mut(); }
+    if handle.is_null() {
+        return std::ptr::null_mut();
+    }
     let peers = (*handle).peers.lock().unwrap();
     let i = index as usize;
-    if i >= peers.len() { return std::ptr::null_mut(); }
+    if i >= peers.len() {
+        return std::ptr::null_mut();
+    }
 
     let peer = &peers[i];
-    let wt_url_ptr = peer.wt_url.as_ref()
+    let wt_url_ptr = peer
+        .wt_url
+        .as_ref()
         .and_then(|s| CString::new(s.as_str()).ok())
         .map(|cs| cs.into_raw())
         .unwrap_or(std::ptr::null_mut());
-    let wt_hash_ptr = peer.wt_cert_hash.as_ref()
+    let wt_hash_ptr = peer
+        .wt_cert_hash
+        .as_ref()
         .and_then(|s| CString::new(s.as_str()).ok())
         .map(|cs| cs.into_raw())
         .unwrap_or(std::ptr::null_mut());
@@ -235,13 +267,25 @@ pub unsafe extern "C" fn bolt_signaling_get_peer(
 /// `peer` must have been returned by bolt_signaling_get_peer.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_peer_free(peer: *mut BoltPeer) {
-    if peer.is_null() { return; }
+    if peer.is_null() {
+        return;
+    }
     let p = Box::from_raw(peer);
-    if !p.peer_code.is_null() { let _ = CString::from_raw(p.peer_code); }
-    if !p.device_name.is_null() { let _ = CString::from_raw(p.device_name); }
-    if !p.device_type.is_null() { let _ = CString::from_raw(p.device_type); }
-    if !p.wt_url.is_null() { let _ = CString::from_raw(p.wt_url); }
-    if !p.wt_cert_hash.is_null() { let _ = CString::from_raw(p.wt_cert_hash); }
+    if !p.peer_code.is_null() {
+        let _ = CString::from_raw(p.peer_code);
+    }
+    if !p.device_name.is_null() {
+        let _ = CString::from_raw(p.device_name);
+    }
+    if !p.device_type.is_null() {
+        let _ = CString::from_raw(p.device_type);
+    }
+    if !p.wt_url.is_null() {
+        let _ = CString::from_raw(p.wt_url);
+    }
+    if !p.wt_cert_hash.is_null() {
+        let _ = CString::from_raw(p.wt_cert_hash);
+    }
 }
 
 /// Check if signaling is connected to at least one plane.
@@ -251,8 +295,17 @@ pub unsafe extern "C" fn bolt_peer_free(peer: *mut BoltPeer) {
 /// `handle` must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_signaling_is_connected(handle: *mut BoltSignaling) -> i32 {
-    if handle.is_null() { return 0; }
-    if (*handle).connected.load(std::sync::atomic::Ordering::Relaxed) { 1 } else { 0 }
+    if handle.is_null() {
+        return 0;
+    }
+    if (*handle)
+        .connected
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        1
+    } else {
+        0
+    }
 }
 
 /// Drain pending events and return count. Use bolt_signaling_peer_count and
@@ -262,7 +315,9 @@ pub unsafe extern "C" fn bolt_signaling_is_connected(handle: *mut BoltSignaling)
 /// `handle` must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_signaling_drain_events(handle: *mut BoltSignaling) -> u32 {
-    if handle.is_null() { return 0; }
+    if handle.is_null() {
+        return 0;
+    }
     let mut events = (*handle).events.lock().unwrap();
     let count = events.len() as u32;
     events.clear();
@@ -277,12 +332,18 @@ pub unsafe extern "C" fn bolt_signaling_drain_events(handle: *mut BoltSignaling)
 /// `handle` must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_signaling_drain_signals(handle: *mut BoltSignaling) -> *mut c_char {
-    if handle.is_null() { return std::ptr::null_mut(); }
+    if handle.is_null() {
+        return std::ptr::null_mut();
+    }
     let mut sigs = (*handle).incoming_signals.lock().unwrap();
-    if sigs.is_empty() { return std::ptr::null_mut(); }
+    if sigs.is_empty() {
+        return std::ptr::null_mut();
+    }
     let joined = sigs.join("\n");
     sigs.clear();
-    CString::new(joined).map(|cs| cs.into_raw()).unwrap_or(std::ptr::null_mut())
+    CString::new(joined)
+        .map(|cs| cs.into_raw())
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// Send a signal to a peer (connection initiation).
@@ -323,13 +384,17 @@ pub unsafe extern "C" fn bolt_signaling_send_signal(
 /// `handle` must be valid. After this call, handle is invalid.
 #[no_mangle]
 pub unsafe extern "C" fn bolt_signaling_stop(handle: *mut BoltSignaling) {
-    if handle.is_null() { return; }
+    if handle.is_null() {
+        return;
+    }
     let sig = Box::from_raw(handle);
     sig.handle.shutdown();
 }
 
 fn cstr_to_string(ptr: *const c_char) -> String {
-    if ptr.is_null() { return String::new(); }
+    if ptr.is_null() {
+        return String::new();
+    }
     unsafe { CStr::from_ptr(ptr).to_str().unwrap_or("").to_string() }
 }
 
@@ -341,11 +406,15 @@ mod tests {
     /// Exercises the same code path as bolt_signaling_get_peer without needing
     /// a live signaling handle.
     fn make_bolt_peer(peer: &PeerInfo) -> *mut BoltPeer {
-        let wt_url_ptr = peer.wt_url.as_ref()
+        let wt_url_ptr = peer
+            .wt_url
+            .as_ref()
             .and_then(|s| CString::new(s.as_str()).ok())
             .map(|cs| cs.into_raw())
             .unwrap_or(std::ptr::null_mut());
-        let wt_hash_ptr = peer.wt_cert_hash.as_ref()
+        let wt_hash_ptr = peer
+            .wt_cert_hash
+            .as_ref()
             .and_then(|s| CString::new(s.as_str()).ok())
             .map(|cs| cs.into_raw())
             .unwrap_or(std::ptr::null_mut());
@@ -382,7 +451,10 @@ mod tests {
             assert!(!p.peer_code.is_null());
             assert!(!p.device_name.is_null());
             assert!(p.wt_url.is_null(), "wt_url must be null for browser peer");
-            assert!(p.wt_cert_hash.is_null(), "wt_cert_hash must be null for browser peer");
+            assert!(
+                p.wt_cert_hash.is_null(),
+                "wt_cert_hash must be null for browser peer"
+            );
             bolt_peer_free(ptr);
         }
     }
@@ -400,7 +472,10 @@ mod tests {
         unsafe {
             let p = &*ptr;
             assert!(!p.wt_url.is_null(), "wt_url must be non-null for WT peer");
-            assert!(!p.wt_cert_hash.is_null(), "wt_cert_hash must be non-null for WT peer");
+            assert!(
+                !p.wt_cert_hash.is_null(),
+                "wt_cert_hash must be non-null for WT peer"
+            );
             let url = CStr::from_ptr(p.wt_url).to_str().unwrap();
             let hash = CStr::from_ptr(p.wt_cert_hash).to_str().unwrap();
             assert_eq!(url, "https://192.168.1.10:9871");
@@ -462,7 +537,10 @@ mod tests {
         let ptr = make_bolt_peer(&peer);
         unsafe {
             let p = &*ptr;
-            assert!(p.device_name.is_null(), "NUL device_name must map to null ptr");
+            assert!(
+                p.device_name.is_null(),
+                "NUL device_name must map to null ptr"
+            );
             assert!(!p.peer_code.is_null(), "clean peer_code must convert");
             assert!(!p.device_type.is_null(), "clean device_type must convert");
             bolt_peer_free(ptr); // must not abort on the null field

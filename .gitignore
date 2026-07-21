@@ -4,7 +4,6 @@ target/
 coverage/
 .DS_Store
 *.log
-src-tauri/bin/
 .gitnexus
 .claude/
 AGENTS.md
