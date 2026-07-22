@@ -20,7 +20,7 @@ jobs:
         working-directory: signal
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
           workspaces: signal
@@ -37,7 +37,7 @@ jobs:
         working-directory: native/shared
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       # native/shared uses sibling path deps:
@@ -58,7 +58,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: dtolnay/rust-toolchain@stable
       - name: Clone bolt-core-sdk (sibling dependency)
         run: git clone --depth 1 https://github.com/the9ines/bolt-core-sdk.git "${{ github.workspace }}/../bolt-core-sdk"
       - name: Build native bridge archive
