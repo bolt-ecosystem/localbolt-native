@@ -4,7 +4,6 @@ target/
 coverage/
 .DS_Store
 *.log
-.gitnexus
 .claude/
 AGENTS.md
 CLAUDE.md
