@@ -28,7 +28,7 @@ jobs:
 
       - name: cargo test (bolt-core interop)
         run: |
-          git clone --depth 1 https://github.com/bolt-ecosystem/bolt-core-sdk.git ../bolt-core-sdk
+          git clone --depth 1 https://github.com/the9ines/bolt-core-sdk.git ../bolt-core-sdk
           cargo add bolt-core --optional --path ../bolt-core-sdk/rust/bolt-core
           sed -i 's/with-bolt-core-tests = \[\]/with-bolt-core-tests = ["bolt-core"]/' Cargo.toml
           cargo test --features with-bolt-core-tests
