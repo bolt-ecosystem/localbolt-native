@@ -130,7 +130,7 @@ Program enrollment is done.
 
 **Option A — Direct GitHub Release (simplest):**
 ```
-https://github.com/the9ines/localbolt-app/releases/latest
+https://github.com/bolt-ecosystem/localbolt-native/releases/latest
 ```
 Sends users to the release page where they download the DMG.
 
@@ -139,7 +139,7 @@ Sends users to the release page where they download the DMG.
 # netlify.toml
 [[redirects]]
   from = "/download/macos"
-  to = "https://github.com/the9ines/localbolt-app/releases/download/localbolt-app-v2.0.0/LocalBolt-2.0.0-arm64.dmg"
+  to = "https://github.com/bolt-ecosystem/localbolt-native/releases/download/localbolt-app-v2.0.0/LocalBolt-2.0.0-arm64.dmg"
   status = 302
 ```
 Gives `localbolt.app/download/macos` as a stable shareable URL.

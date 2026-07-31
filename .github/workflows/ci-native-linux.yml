@@ -30,7 +30,7 @@ jobs:
       # Cargo.toml: ../../../../bolt-core-sdk/rust/... resolves to ../bolt-core-sdk
       # relative to the workspace root.
       - name: Clone bolt-core-sdk (sibling dependency)
-        run: git clone --depth 1 https://github.com/the9ines/bolt-core-sdk.git "${{ github.workspace }}/../bolt-core-sdk"
+        run: git clone --depth 1 https://github.com/bolt-ecosystem/bolt-core-sdk.git "${{ github.workspace }}/../bolt-core-sdk"
 
       - name: cargo fmt
         working-directory: native/linux/cli

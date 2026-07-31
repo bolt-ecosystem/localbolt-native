@@ -4,7 +4,7 @@ Native macOS desktop app for [LocalBolt](https://localbolt.app). Encrypted peer-
 
 ## Download
 
-**[LocalBolt 2.0.0 for macOS →](https://github.com/the9ines/localbolt-native/releases/tag/localbolt-app-v2.0.0)**
+**[LocalBolt 2.0.0 for macOS →](https://github.com/bolt-ecosystem/localbolt-native/releases/tag/localbolt-app-v2.0.0)**
 
 | | |
 |---|---|
@@ -16,7 +16,7 @@ Native macOS desktop app for [LocalBolt](https://localbolt.app). Encrypted peer-
 > **First launch:** Right-click the app, click Open, then click Open again in the dialog.
 > This only needs to be done once — macOS remembers the exception.
 
-Checksum verification: see [SHA256SUMS.txt](https://github.com/the9ines/localbolt-native/releases/download/localbolt-app-v2.0.0/SHA256SUMS.txt) on the release page.
+Checksum verification: see [SHA256SUMS.txt](https://github.com/bolt-ecosystem/localbolt-native/releases/download/localbolt-app-v2.0.0/SHA256SUMS.txt) on the release page.
 
 ## Architecture
 
@@ -26,7 +26,7 @@ LocalBolt Native is a **SwiftUI** macOS app with a **Rust** cryptographic core a
 |-------|-----------|------|
 | UI shell | SwiftUI | macOS-native drag-and-drop, transfer progress, device discovery |
 | FFI bridge | Rust → C-ABI static library (`libbolt_native_bridge.a`) | Cryptographic operations, protocol logic |
-| Transport daemon | [bolt-daemon](https://github.com/the9ines/bolt-daemon) sidecar | WebSocket (default) + WebTransport (browser↔native) |
+| Transport daemon | [bolt-daemon](https://github.com/bolt-ecosystem/bolt-daemon) sidecar | WebSocket (default) + WebTransport (browser↔native) |
 | Encryption | Bolt Transfer Ratchet (BTR) | Per-transfer DH ratchet + ChaCha20-Poly1305 chunk encryption |
 | Identity | Profile Envelope v1 | NaCl-box outer encryption with Ed25519 identity keys |
 
@@ -45,17 +45,17 @@ localbolt-native/
 
 ## Ecosystem
 
-LocalBolt Native is part of the [Bolt Protocol](https://github.com/the9ines/bolt-protocol) ecosystem.
+LocalBolt Native is part of the [Bolt Protocol](https://github.com/bolt-ecosystem/bolt-protocol) ecosystem.
 
 | Relationship | Repository |
 |-------------|-----------|
-| Ecosystem governance | [bolt-ecosystem](https://github.com/the9ines/bolt-ecosystem) |
-| Protocol spec | [bolt-protocol](https://github.com/the9ines/bolt-protocol) |
-| SDK (Rust) | [bolt-core-sdk](https://github.com/the9ines/bolt-core-sdk) |
-| Daemon | [bolt-daemon](https://github.com/the9ines/bolt-daemon) |
-| Signal server (subtree) | [bolt-rendezvous](https://github.com/the9ines/bolt-rendezvous) |
-| Web app | [localbolt-v3](https://github.com/the9ines/localbolt-v3) |
-| Self-hosted | [localbolt](https://github.com/the9ines/localbolt) |
+| Ecosystem governance | [bolt-ecosystem](https://github.com/bolt-ecosystem/bolt-workspace) |
+| Protocol spec | [bolt-protocol](https://github.com/bolt-ecosystem/bolt-protocol) |
+| SDK (Rust) | [bolt-core-sdk](https://github.com/bolt-ecosystem/bolt-core-sdk) |
+| Daemon | [bolt-daemon](https://github.com/bolt-ecosystem/bolt-daemon) |
+| Signal server (subtree) | [bolt-rendezvous](https://github.com/bolt-ecosystem/bolt-rendezvous) |
+| Web app | [localbolt-v3](https://github.com/bolt-ecosystem/localbolt-v3) |
+| Self-hosted | [localbolt](https://github.com/bolt-ecosystem/localbolt) |
 
 This is an **open-source** project. Free to use, build, and modify.
 
@@ -63,7 +63,7 @@ This is an **open-source** project. Free to use, build, and modify.
 
 - **[localbolt.app](https://localbolt.app)** — use it in the browser, no install
 - **[localbolt.app/download/macos](https://localbolt.app/download/macos)** — direct DMG download
-- **[LocalBolt (self-hosted)](https://github.com/the9ines/localbolt)** — download and run on your own network
+- **[LocalBolt (self-hosted)](https://github.com/bolt-ecosystem/localbolt)** — download and run on your own network
 
 ## Historical Note
 
