@@ -105,9 +105,9 @@ jobs:
           Features:   transport-ws,transport-webtransport
           Arch:       x86_64-unknown-linux-gnu
           Runner:     ubuntu-latest
-          CLI repo:   the9ines/localbolt-native @ ${{ github.sha }}
-          Daemon repo: the9ines/bolt-daemon @ ${DAEMON_SHA}
-          SDK repo:   the9ines/bolt-core-sdk @ ${SDK_SHA}
+          CLI repo:   bolt-ecosystem/localbolt-native @ ${{ github.sha }}
+          Daemon repo: bolt-ecosystem/bolt-daemon @ ${DAEMON_SHA}
+          SDK repo:   bolt-ecosystem/bolt-core-sdk @ ${SDK_SHA}
           BINFO_EOF
 
           ls -la "$STAGE/"

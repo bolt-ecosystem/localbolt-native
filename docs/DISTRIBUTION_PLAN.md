@@ -41,7 +41,7 @@
 The web frontend mentions "desktop app" in **5 places** (hero tagline, features
 card, how-it-works step, 2 FAQ answers) but provides **zero download links**.
 No `/download` route exists in Netlify config. Footer links to the self-hosted
-repo (`the9ines/localbolt`), not the app repo (`the9ines/localbolt-app`).
+repo (`bolt-ecosystem/localbolt`), not the app repo (`bolt-ecosystem/localbolt-native`).
 
 ---
 
@@ -123,7 +123,7 @@ Program enrollment is done.
 2. **Hero area or nav** — optional CTA button (e.g. "Download for Mac").
    Lower priority than making the features card actionable.
 
-3. **Footer** — add link to `the9ines/localbolt-app` GitHub repo alongside
+3. **Footer** — add link to `bolt-ecosystem/localbolt-native` GitHub repo alongside
    existing GitHub link.
 
 ### Link target
@@ -210,7 +210,7 @@ Phase 5: Linux distribution
   1. Build localbolt-cli from native/linux/cli (scripts/build-linux-cli.sh)
   2. Bundle bolt-daemon Linux binary
   3. Create tarball: localbolt-cli-<version>-x86_64-linux.tar.gz
-  4. Upload to GitHub Releases (the9ines/localbolt-native)
+  4. Upload to GitHub Releases (bolt-ecosystem/localbolt-native)
   5. Add /download/linux and /download/linux/steam-deck redirects to localbolt.app
   6. Document: Desktop Mode required, manual install to ~/.local/bin/
 
