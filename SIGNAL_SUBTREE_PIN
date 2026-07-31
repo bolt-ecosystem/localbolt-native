@@ -1,2 +1,2 @@
 UPSTREAM_REPO=bolt-ecosystem/bolt-rendezvous
-UPSTREAM_TAG=rendezvous-v0.2.15-rand-0.8.6
+UPSTREAM_TAG=rendezvous-v0.2.16-deps

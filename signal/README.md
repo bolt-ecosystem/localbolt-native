@@ -117,12 +117,12 @@ None. Standalone Rust binary.
 
 ## Bundled By
 
-- [localbolt](https://github.com/the9ines/localbolt) — via git subtree (offline mode)
-- [localbolt-app](https://github.com/the9ines/localbolt-app) — via git subtree (offline mode)
+- [localbolt](https://github.com/bolt-ecosystem/localbolt) — via git subtree (offline mode)
+- [localbolt-app](https://github.com/bolt-ecosystem/localbolt-native) — via git subtree (offline mode)
 
 ## Hosted Consumers
 
-- [localbolt-v3](https://github.com/the9ines/localbolt-v3) — connects to hosted endpoint only
+- [localbolt-v3](https://github.com/bolt-ecosystem/localbolt-v3) — connects to hosted endpoint only
 
 ## License
 

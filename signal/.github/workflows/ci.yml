@@ -34,7 +34,7 @@ jobs:
       - name: Checkout bolt-core-sdk (sibling, pinned)
         uses: actions/checkout@v4
         with:
-          repository: the9ines/bolt-core-sdk
+          repository: bolt-ecosystem/bolt-core-sdk
           ref: 1694aa62f577eda9fd748017c43bc960bc4462ff
           path: bolt-core-sdk
           fetch-depth: 1
