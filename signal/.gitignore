@@ -2,3 +2,5 @@
 /target
 /protocol/target
 /protocol/Cargo.lock
+/interop-tests/target
+/interop-tests/Cargo.lock

@@ -18,7 +18,7 @@
 //!
 //! `RUST_LOG` always overrides the profile log level when set.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use bolt_rendezvous::SignalingServer;
 use tracing_subscriber::EnvFilter;
@@ -74,7 +74,46 @@ async fn main() {
         std::process::exit(1);
     });
 
-    let server = SignalingServer::new(addr);
+    // Parse TRUSTED_PROXIES env var (comma-separated IP addresses).
+    // Empty or unset → no proxies trusted (fail-closed).
+    let trusted_proxies: Vec<IpAddr> = std::env::var("TRUSTED_PROXIES")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            match trimmed.parse::<IpAddr>() {
+                Ok(ip) => Some(ip),
+                Err(e) => {
+                    tracing::warn!(value = %trimmed, error = %e, "invalid TRUSTED_PROXIES entry — skipped");
+                    None
+                }
+            }
+        })
+        .collect();
+
+    if !trusted_proxies.is_empty() {
+        tracing::info!(count = trusted_proxies.len(), "TRUSTED_PROXIES configured");
+    }
+
+    // Parse MAX_WS_CONNECTIONS env var (optional). Default defined in lib.rs.
+    let max_connections: Option<usize> = std::env::var("MAX_WS_CONNECTIONS")
+        .ok()
+        .and_then(|v| match v.trim().parse::<usize>() {
+            Ok(n) => Some(n),
+            Err(e) => {
+                tracing::warn!(value = %v, error = %e, "invalid MAX_WS_CONNECTIONS — using default");
+                None
+            }
+        });
+
+    let mut server = SignalingServer::new(addr).with_trusted_proxies(trusted_proxies);
+    if let Some(max) = max_connections {
+        tracing::info!(max_connections = max, "MAX_WS_CONNECTIONS configured");
+        server = server.with_max_connections(max);
+    }
 
     if let Err(e) = server.run().await {
         eprintln!("server error: {e}");

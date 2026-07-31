@@ -18,7 +18,6 @@ dashmap = "6"
 
 [features]
 default = []
-with-bolt-core-tests = []
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "macros", "rt"] }

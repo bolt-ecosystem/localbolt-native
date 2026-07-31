@@ -9,7 +9,7 @@
 //! # Wire Format
 //!
 //! Client-to-server messages use `snake_case` type tags:
-//! - `register`, `signal`, `ping`
+//! - `register`, `signal`, `manual_signal`, `ping`
 //!
 //! Server-to-client messages use `snake_case` type tags:
 //! - `peers`, `peer_joined`, `peer_left`, `signal`, `error`
@@ -34,6 +34,12 @@ pub struct PeerData {
     pub peer_code: String,
     pub device_name: String,
     pub device_type: DeviceType,
+    /// WebTransport URL (e.g. "https://192.168.4.210:9948"). Optional — only desktop peers with WT enabled.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub wt_url: Option<String>,
+    /// WebTransport TLS certificate SHA-256 hash (hex). Required for browser serverCertificateHashes.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub wt_cert_hash: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -49,9 +55,22 @@ pub enum ClientMessage {
         peer_code: String,
         device_name: String,
         device_type: DeviceType,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        wt_url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        wt_cert_hash: Option<String>,
     },
     /// Relay a WebRTC signaling payload to another peer.
+    ///
+    /// This path is room-scoped: the target must be in the sender's effective-IP
+    /// room.
     Signal {
+        to: String,
+        payload: serde_json::Value,
+    },
+    /// Relay a WebRTC signaling payload to an exact peer code for explicit
+    /// manual pairing. This does not add the peer to automatic discovery.
+    ManualSignal {
         to: String,
         payload: serde_json::Value,
     },
@@ -134,6 +153,22 @@ mod tests {
     }
 
     #[test]
+    fn wire_client_manual_signal() {
+        let msg = ClientMessage::ManualSignal {
+            to: "XYZ789".into(),
+            payload: json!({"sdp": "offer-data"}),
+        };
+        assert_wire_eq(
+            &msg,
+            json!({
+                "type": "manual_signal",
+                "to": "XYZ789",
+                "payload": {"sdp": "offer-data"}
+            }),
+        );
+    }
+
+    #[test]
     fn wire_client_ping() {
         let msg = ClientMessage::Ping;
         assert_wire_eq(&msg, json!({"type": "ping"}));
@@ -148,6 +183,8 @@ mod tests {
                 peer_code: "ABC123".into(),
                 device_name: "MacBook".into(),
                 device_type: DeviceType::Laptop,
+                wt_url: None,
+                wt_cert_hash: None,
             }],
         };
         assert_wire_eq(
@@ -170,6 +207,8 @@ mod tests {
                 peer_code: "DEF456".into(),
                 device_name: "iPad".into(),
                 device_type: DeviceType::Tablet,
+                wt_url: None,
+                wt_cert_hash: None,
             },
         };
         assert_wire_eq(
@@ -240,6 +279,7 @@ mod tests {
                 peer_code,
                 device_name,
                 device_type,
+                ..
             } => {
                 assert_eq!(peer_code, "ABC123");
                 assert_eq!(device_name, "iPhone 15");
@@ -259,6 +299,19 @@ mod tests {
                 assert!(payload.get("sdp").is_some());
             }
             _ => panic!("expected Signal"),
+        }
+    }
+
+    #[test]
+    fn deserialize_client_manual_signal() {
+        let json = r#"{"type":"manual_signal","to":"XYZ789","payload":{"sdp":"..."}}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            ClientMessage::ManualSignal { to, payload } => {
+                assert_eq!(to, "XYZ789");
+                assert!(payload.get("sdp").is_some());
+            }
+            _ => panic!("expected ManualSignal"),
         }
     }
 
@@ -335,6 +388,8 @@ mod tests {
             peer_code: "ABC".into(),
             device_name: "Test".into(),
             device_type: DeviceType::Desktop,
+            wt_url: None,
+            wt_cert_hash: None,
         };
         let cloned = msg.clone();
         let orig_val = serde_json::to_value(&msg).unwrap();

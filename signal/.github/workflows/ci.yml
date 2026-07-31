@@ -9,8 +9,13 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bolt-rendezvous
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: bolt-rendezvous
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -26,10 +31,19 @@ jobs:
       - name: cargo test
         run: cargo test
 
-      - name: cargo test (bolt-core interop)
+      - name: Checkout bolt-core-sdk (sibling, pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: the9ines/bolt-core-sdk
+          ref: 1694aa62f577eda9fd748017c43bc960bc4462ff
+          path: bolt-core-sdk
+          fetch-depth: 1
+
+      - name: Verify sibling layout
         run: |
-          git clone --depth 1 https://github.com/the9ines/bolt-core-sdk.git ../bolt-core-sdk
-          cargo add bolt-core --optional --path ../bolt-core-sdk/rust/bolt-core
-          sed -i 's/with-bolt-core-tests = \[\]/with-bolt-core-tests = ["bolt-core"]/' Cargo.toml
-          cargo test --features with-bolt-core-tests
-          git checkout -- Cargo.toml Cargo.lock
+          pwd
+          ls -la ..
+          test -d ../bolt-core-sdk/rust/bolt-core
+
+      - name: cargo test (bolt-core interop crate)
+        run: cargo test --manifest-path interop-tests/Cargo.toml

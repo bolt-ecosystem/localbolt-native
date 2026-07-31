@@ -1,0 +1,9 @@
+[package]
+name = "rendezvous-interop-tests"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+bolt-rendezvous = { path = ".." }
+bolt-core = { path = "../../bolt-core-sdk/rust/bolt-core" }

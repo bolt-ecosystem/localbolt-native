@@ -67,3 +67,31 @@ jobs:
       - name: Build SwiftUI shell
         working-directory: native/macos
         run: swift build -c release
+
+  subtree-drift-guard:
+    name: Signal Subtree Drift Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Read subtree pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          source SIGNAL_SUBTREE_PIN
+          echo "UPSTREAM_REPO=$UPSTREAM_REPO" >> "$GITHUB_ENV"
+          echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> "$GITHUB_ENV"
+
+      - name: Checkout canonical bolt-rendezvous
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ env.UPSTREAM_TAG }}
+          path: canonical-rendezvous
+          fetch-depth: 1
+
+      - name: Sanity check canonical
+        run: test -f canonical-rendezvous/Cargo.toml
+
+      - name: Verify signal subtree
+        run: CANONICAL_DIR="$GITHUB_WORKSPACE/canonical-rendezvous" bash scripts/verify_signal_subtree.sh

@@ -1,4 +1,10 @@
-# Vendored Rendezvous Docs
+# Bolt Rendezvous Docs
 
-This subtree mirrors the rendezvous server used by LocalBolt native builds.
-Canonical rendezvous development happens in `bolt-rendezvous`.
+Public docs for the untrusted signaling/rendezvous server.
+
+| File | Purpose |
+|------|---------|
+| `CHANGELOG.md` | Public rendezvous changelog |
+
+The rendezvous server relays discovery/signaling data. It is not trusted with
+plaintext file contents or encryption keys.

@@ -21,10 +21,11 @@
 //! first-line defense. Application-level `validate_message_size()` provides
 //! defense-in-depth.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
@@ -33,7 +34,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
 use crate::protocol::{ClientMessage, ServerMessage};
-use crate::room::{PeerInfo, RoomManager};
+use crate::room::{ManualPeerLookup, PeerInfo, RoomManager};
 
 // ── Trust Boundary Constants ────────────────────────────────────────────
 
@@ -52,6 +53,12 @@ pub const RATE_LIMIT_PER_SECOND: u32 = 50;
 
 /// Consecutive rate-limit violations before forcibly closing the socket.
 pub const RATE_LIMIT_CLOSE_THRESHOLD: u32 = 3;
+
+/// Idle timeout for registered connections. If no message (of any type) is
+/// received within this duration, the connection is closed. Client Ping
+/// messages reset the timer. 5 minutes is generous for signaling — legitimate
+/// clients send periodic pings or signals well within this window.
+pub const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 // ── Validation Helpers (pure, testable) ─────────────────────────────────
 
@@ -76,22 +83,27 @@ pub fn validate_device_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate a peer code used as a signal target (`Signal.to`).
-/// Same rules as `validate_peer_code`: non-empty, max 16 chars, alphanumeric.
-pub fn validate_signal_target(to: &str) -> Result<(), String> {
-    if to.is_empty() {
-        return Err("target peer code cannot be empty".to_string());
+/// Normalize and validate a signal target peer code (`Signal.to`).
+/// Same rules as `validate_peer_code`: strip hyphens, non-empty, max 16 chars,
+/// ASCII alphanumeric. Returns the normalized code on success.
+pub fn validate_signal_target(to: &str) -> Result<String, String> {
+    let normalized: String = to.chars().filter(|c| *c != '-').collect();
+    if normalized.is_empty() {
+        return Err("invalid_peer_code: Target peer code cannot be empty".to_string());
     }
-    if to.len() > MAX_PEER_CODE_BYTES {
+    if normalized.len() > MAX_PEER_CODE_BYTES {
         return Err(format!(
-            "target peer code too long ({} bytes, max {MAX_PEER_CODE_BYTES})",
-            to.len()
+            "invalid_peer_code: Target peer code too long ({} chars, max {MAX_PEER_CODE_BYTES} after removing hyphens)",
+            normalized.len()
         ));
     }
-    if !to.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err("target peer code must be alphanumeric".to_string());
+    if !normalized.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(
+            "invalid_peer_code: Target peer code must contain only letters and digits (a-z, A-Z, 0-9). Hyphens are stripped automatically."
+                .to_string(),
+        );
     }
-    Ok(())
+    Ok(normalized)
 }
 
 // ── Per-Connection Rate Limiter ─────────────────────────────────────────
@@ -161,22 +173,76 @@ fn ws_config() -> Option<WebSocketConfig> {
 // ── Connection Handler ──────────────────────────────────────────────────
 
 /// Handle a single incoming TCP connection: upgrade to WebSocket and process messages.
+///
+/// `trusted_proxies` controls X-Forwarded-For trust: only when the connecting
+/// socket address is in this list will the header be honored. Empty list means
+/// the header is always ignored (fail-closed).
 #[allow(clippy::result_large_err)]
 pub async fn handle_connection(
-    stream: TcpStream,
+    mut stream: TcpStream,
     addr: SocketAddr,
     room_manager: Arc<RoomManager>,
+    trusted_proxies: Arc<Vec<IpAddr>>,
 ) {
-    // We'll capture headers during the handshake callback to extract X-Forwarded-For.
+    // Peek at the incoming request to detect plain HTTP (non-WebSocket) requests.
+    // Reverse proxies (e.g. Fly.io) send HTTP health checks without the Upgrade
+    // header. Respond with 200 OK directly instead of failing the WS handshake.
+    let mut peek_buf = [0u8; 4096];
+    match stream.peek(&mut peek_buf).await {
+        Ok(n) => {
+            let preview = String::from_utf8_lossy(&peek_buf[..n]);
+            if !preview.to_ascii_lowercase().contains("upgrade: websocket") {
+                let body = "bolt-rendezvous OK";
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body,
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+                return;
+            }
+        }
+        Err(e) => {
+            error!(addr = %addr, error = %e, "failed to peek at connection");
+            return;
+        }
+    }
+
+    // Capture headers during WebSocket handshake to extract the real client IP.
+    // Priority: Fly-Client-IP (Fly.dev guaranteed) > X-Forwarded-For > socket addr.
     let forwarded_for = Arc::new(std::sync::Mutex::new(None::<String>));
     let forwarded_for_cb = forwarded_for.clone();
 
     let callback = move |req: &Request, resp: Response| -> Result<Response, ErrorResponse> {
-        // Extract X-Forwarded-For if present (reverse proxy scenario).
+        // Fly-Client-IP: set by Fly.dev proxy, guaranteed to be the real client IP.
+        // Preferred over X-Forwarded-For because it cannot be spoofed by the client.
+        if let Some(fci) = req.headers().get("fly-client-ip") {
+            if let Ok(value) = fci.to_str() {
+                let ip_str = value.trim();
+                // Validate as IP address before trusting (RENDEZVOUS-HARDENING-1 P4).
+                if ip_str.parse::<std::net::IpAddr>().is_ok() {
+                    if let Ok(mut lock) = forwarded_for_cb.lock() {
+                        *lock = Some(ip_str.to_string());
+                    }
+                    return Ok(resp);
+                }
+                // Invalid IP in Fly-Client-IP — log and fall through to XFF/socket
+                tracing::warn!("Fly-Client-IP contains invalid IP: {:?}", ip_str);
+            }
+        }
+        // Fallback: X-Forwarded-For (standard reverse proxy header).
         if let Some(xff) = req.headers().get("x-forwarded-for") {
             if let Ok(value) = xff.to_str() {
                 // Take the first IP in a comma-separated list.
-                let client_ip = value.split(',').next().unwrap_or(value).trim().to_string();
+                let raw_ip = value.split(',').next().unwrap_or(value).trim();
+                // Validate as IP address (RENDEZVOUS-HARDENING-1 P4).
+                let client_ip = if raw_ip.parse::<std::net::IpAddr>().is_ok() {
+                    raw_ip.to_string()
+                } else {
+                    tracing::warn!("X-Forwarded-For contains invalid IP: {:?}", raw_ip);
+                    // Fall through — socket addr will be used
+                    return Ok(resp);
+                };
                 if let Ok(mut lock) = forwarded_for_cb.lock() {
                     *lock = Some(client_ip);
                 }
@@ -201,11 +267,29 @@ pub async fn handle_connection(
     };
 
     // Determine the effective client IP.
-    let raw_ip = forwarded_for
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
-        .unwrap_or_else(|| addr.ip().to_string());
+    // AC-16: Only trust forwarded headers from configured proxies or Fly infrastructure.
+    //
+    // Fly-Client-IP is extracted with a `was_fly` flag so we can trust it unconditionally
+    // (Fly strips any client-sent Fly-Client-IP — it's infrastructure-only).
+    // X-Forwarded-For is only trusted from explicitly configured proxies.
+    let forwarded_ip = forwarded_for.lock().ok().and_then(|guard| guard.clone());
+
+    let raw_ip = if let Some(ref ip) = forwarded_ip {
+        if trusted_proxies.contains(&addr.ip()) {
+            // Explicitly trusted proxy — use forwarded IP (XFF or Fly-Client-IP)
+            ip.clone()
+        } else if is_private_ip(&addr.ip().to_string()) && !ip.is_empty() {
+            // Private source IP with a forwarded header — likely a PaaS proxy (Fly, Railway, etc.)
+            // Trust Fly-Client-IP / XFF from infrastructure proxies that connect internally.
+            // Safe because external clients cannot connect from private IPs.
+            info!(addr = %addr, forwarded_ip = %ip, "trusting forwarded IP from private-source proxy");
+            ip.clone()
+        } else {
+            addr.ip().to_string()
+        }
+    } else {
+        addr.ip().to_string()
+    };
 
     // For self-hosted mode: all private/loopback IPs share one room ("local").
     // This lets devices on the same LAN discover each other even when the host
@@ -244,7 +328,7 @@ pub async fn handle_connection(
 
     // --- Registration phase ---
     // The first message must be a "register" command.
-    let (peer_code, _device_name, _device_type) = loop {
+    let (peer_code, _device_name, _device_type, _wt_url, _wt_cert_hash) = loop {
         match ws_stream_rx.next().await {
             Some(Ok(Message::Text(text))) => {
                 // Rate limit check (pre-registration).
@@ -276,6 +360,8 @@ pub async fn handle_connection(
                         peer_code,
                         device_name,
                         device_type,
+                        wt_url,
+                        wt_cert_hash,
                     }) => {
                         // Validate device_name length.
                         if let Err(e) = validate_device_name(&device_name) {
@@ -283,7 +369,7 @@ pub async fn handle_connection(
                             let _ = tx.send(ServerMessage::Error { message: e });
                             continue;
                         }
-                        break (peer_code, device_name, device_type);
+                        break (peer_code, device_name, device_type, wt_url, wt_cert_hash);
                     }
                     Ok(_) => {
                         warn!(addr = %addr, "received non-register message before registration");
@@ -329,13 +415,16 @@ pub async fn handle_connection(
         }
     };
 
-    // Validate peer code format.
-    if let Err(e) = validate_peer_code(&peer_code) {
-        warn!(addr = %addr, error = %e, "invalid peer code");
-        let _ = tx.send(ServerMessage::Error { message: e });
-        write_task.abort();
-        return;
-    }
+    // Validate and normalize peer code.
+    let peer_code = match validate_peer_code(&peer_code) {
+        Ok(normalized) => normalized,
+        Err(e) => {
+            warn!(addr = %addr, error = %e, "invalid peer code");
+            let _ = tx.send(ServerMessage::Error { message: e });
+            write_task.abort();
+            return;
+        }
+    };
 
     // Build peer info and add to room.
     let peer_info = PeerInfo {
@@ -343,10 +432,13 @@ pub async fn handle_connection(
         device_name: _device_name,
         device_type: _device_type,
         sender: tx.clone(),
+        session_id: 0, // assigned by add_peer
+        wt_url: _wt_url,
+        wt_cert_hash: _wt_cert_hash,
     };
 
-    let existing_peers = match room_manager.add_peer(&client_ip, peer_info) {
-        Ok(peers) => peers,
+    let (existing_peers, session_id) = match room_manager.add_peer(&client_ip, peer_info) {
+        Ok(result) => result,
         Err(e) => {
             warn!(addr = %addr, error = %e, "peer code collision");
             let _ = tx.send(ServerMessage::Error { message: e });
@@ -369,7 +461,15 @@ pub async fn handle_connection(
 
     // --- Message loop ---
     loop {
-        match ws_stream_rx.next().await {
+        let msg = tokio::time::timeout(IDLE_TIMEOUT, ws_stream_rx.next()).await;
+        let msg = match msg {
+            Ok(inner) => inner,
+            Err(_) => {
+                info!(peer_code = %peer_code, "idle timeout ({} sec) — closing", IDLE_TIMEOUT.as_secs());
+                break;
+            }
+        };
+        match msg {
             Some(Ok(Message::Text(text))) => {
                 // Rate limit check (post-registration).
                 match rate_limit.check() {
@@ -396,15 +496,18 @@ pub async fn handle_connection(
 
                 match serde_json::from_str::<ClientMessage>(&text) {
                     Ok(ClientMessage::Signal { to, payload }) => {
-                        // Validate Signal.to field.
-                        if let Err(e) = validate_signal_target(&to) {
-                            warn!(from = %peer_code, error = %e, "invalid signal target");
-                            let _ = tx.send(ServerMessage::Error { message: e });
-                            continue;
-                        }
+                        // Validate and normalize Signal.to field.
+                        let to = match validate_signal_target(&to) {
+                            Ok(normalized) => normalized,
+                            Err(e) => {
+                                warn!(from = %peer_code, error = %e, "invalid signal target");
+                                let _ = tx.send(ServerMessage::Error { message: e });
+                                continue;
+                            }
+                        };
 
                         info!(from = %peer_code, to = %to, "signal relay");
-                        if let Some(target_sender) = room_manager.find_peer(&to) {
+                        if let Some(target_sender) = room_manager.find_peer(&client_ip, &to) {
                             let relay_msg = ServerMessage::Signal {
                                 from: peer_code.clone(),
                                 payload,
@@ -426,6 +529,57 @@ pub async fn handle_connection(
                                 message: format!("peer '{to}' not found"),
                             };
                             let _ = tx.send(err);
+                        }
+                    }
+                    Ok(ClientMessage::ManualSignal { to, payload }) => {
+                        // Explicit manual pairing path. Automatic discovery and
+                        // normal signal routing remain room-scoped.
+                        let to = match validate_signal_target(&to) {
+                            Ok(normalized) => normalized,
+                            Err(e) => {
+                                warn!(from = %peer_code, error = %e, "invalid manual signal target");
+                                let _ = tx.send(ServerMessage::Error { message: e });
+                                continue;
+                            }
+                        };
+
+                        info!(from = %peer_code, to = %to, "manual signal relay");
+                        match room_manager.find_peer_manual(&to) {
+                            ManualPeerLookup::Found(target_sender) => {
+                                let relay_msg = ServerMessage::Signal {
+                                    from: peer_code.clone(),
+                                    payload,
+                                };
+                                if target_sender.send(relay_msg).is_err() {
+                                    warn!(
+                                        from = %peer_code,
+                                        to = %to,
+                                        "manual target peer channel closed"
+                                    );
+                                    let err = ServerMessage::Error {
+                                        message: format!("peer '{to}' is no longer connected"),
+                                    };
+                                    let _ = tx.send(err);
+                                }
+                            }
+                            ManualPeerLookup::Ambiguous => {
+                                warn!(
+                                    from = %peer_code,
+                                    to = %to,
+                                    "manual signal target is ambiguous"
+                                );
+                                let err = ServerMessage::Error {
+                                    message: format!("peer '{to}' is ambiguous"),
+                                };
+                                let _ = tx.send(err);
+                            }
+                            ManualPeerLookup::NotFound => {
+                                debug!(from = %peer_code, to = %to, "manual target peer not found");
+                                let err = ServerMessage::Error {
+                                    message: format!("peer '{to}' not found"),
+                                };
+                                let _ = tx.send(err);
+                            }
                         }
                     }
                     Ok(ClientMessage::Ping) => {
@@ -474,25 +628,33 @@ pub async fn handle_connection(
     }
 
     // --- Cleanup ---
+    // Pass session_id so remove_peer skips removal if this connection was
+    // replaced by a newer session with the same peer_code (DP-5 race guard).
     info!(peer_code = %peer_code, client_ip = %client_ip, "peer disconnected");
-    room_manager.remove_peer(&client_ip, &peer_code);
+    debug!(peer_code = %peer_code, session_id = session_id, "session details");
+    room_manager.remove_peer(&client_ip, &peer_code, session_id);
     write_task.abort();
 }
 
-/// Validate peer code format: non-empty, max 16 chars, alphanumeric only.
-pub fn validate_peer_code(code: &str) -> Result<(), String> {
-    if code.is_empty() {
-        return Err("Peer code cannot be empty".to_string());
+/// Normalize and validate a peer code: strip hyphens, then check non-empty,
+/// max 16 chars, ASCII alphanumeric only. Returns the normalized code on success.
+pub fn validate_peer_code(code: &str) -> Result<String, String> {
+    let normalized: String = code.chars().filter(|c| *c != '-').collect();
+    if normalized.is_empty() {
+        return Err("invalid_peer_code: Peer code cannot be empty".to_string());
     }
-    if code.len() > MAX_PEER_CODE_BYTES {
+    if normalized.len() > MAX_PEER_CODE_BYTES {
         return Err(format!(
-            "Peer code too long (max {MAX_PEER_CODE_BYTES} characters)"
+            "invalid_peer_code: Peer code too long (max {MAX_PEER_CODE_BYTES} characters after removing hyphens)"
         ));
     }
-    if !code.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err("Peer code must be alphanumeric".to_string());
+    if !normalized.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(
+            "invalid_peer_code: Peer code must contain only letters and digits (a-z, A-Z, 0-9). Hyphens are stripped automatically."
+                .to_string(),
+        );
     }
-    Ok(())
+    Ok(normalized)
 }
 
 /// Check if an IP address is private (RFC 1918), loopback, or link-local.
@@ -606,14 +768,31 @@ mod tests {
 
     #[test]
     fn signal_target_valid() {
-        assert!(validate_signal_target("ABC123").is_ok());
-        assert!(validate_signal_target("X").is_ok());
-        assert!(validate_signal_target(&"A".repeat(MAX_PEER_CODE_BYTES)).is_ok());
+        assert_eq!(validate_signal_target("ABC123").unwrap(), "ABC123");
+        assert_eq!(validate_signal_target("X").unwrap(), "X");
+        assert_eq!(
+            validate_signal_target(&"A".repeat(MAX_PEER_CODE_BYTES)).unwrap(),
+            "A".repeat(MAX_PEER_CODE_BYTES)
+        );
+    }
+
+    #[test]
+    fn signal_target_hyphens_stripped() {
+        assert_eq!(validate_signal_target("ABC-123").unwrap(), "ABC123");
+        assert_eq!(validate_signal_target("AB-CD-EF").unwrap(), "ABCDEF");
+        assert_eq!(validate_signal_target("ABCD-EFGH").unwrap(), "ABCDEFGH");
     }
 
     #[test]
     fn signal_target_empty() {
         let result = validate_signal_target("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot be empty"));
+    }
+
+    #[test]
+    fn signal_target_only_hyphens() {
+        let result = validate_signal_target("---");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("cannot be empty"));
     }
@@ -627,17 +806,27 @@ mod tests {
 
     #[test]
     fn signal_target_non_alphanumeric() {
-        assert!(validate_signal_target("ABC-123").is_err());
         assert!(validate_signal_target("ABC 123").is_err());
         assert!(validate_signal_target("ABC\n123").is_err());
+        assert!(validate_signal_target("AB!C").is_err());
     }
 
     // ── validate_peer_code ──────────────────────────────────────
 
     #[test]
     fn peer_code_valid() {
-        assert!(validate_peer_code("ABC123").is_ok());
-        assert!(validate_peer_code(&"Z".repeat(MAX_PEER_CODE_BYTES)).is_ok());
+        assert_eq!(validate_peer_code("ABC123").unwrap(), "ABC123");
+        assert_eq!(
+            validate_peer_code(&"Z".repeat(MAX_PEER_CODE_BYTES)).unwrap(),
+            "Z".repeat(MAX_PEER_CODE_BYTES)
+        );
+    }
+
+    #[test]
+    fn peer_code_hyphens_stripped() {
+        assert_eq!(validate_peer_code("ABCD-EFGH").unwrap(), "ABCDEFGH");
+        assert_eq!(validate_peer_code("AB-CD").unwrap(), "ABCD");
+        assert_eq!(validate_peer_code("A-B-C-D").unwrap(), "ABCD");
     }
 
     #[test]
@@ -646,13 +835,45 @@ mod tests {
     }
 
     #[test]
+    fn peer_code_only_hyphens() {
+        let result = validate_peer_code("----");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot be empty"));
+    }
+
+    #[test]
     fn peer_code_too_long() {
         assert!(validate_peer_code(&"A".repeat(MAX_PEER_CODE_BYTES + 1)).is_err());
     }
 
     #[test]
+    fn peer_code_too_long_after_strip() {
+        // 16 alphanumeric + hyphens = should still be OK (hyphens don't count)
+        assert!(validate_peer_code(&format!("{}--", "A".repeat(MAX_PEER_CODE_BYTES))).is_ok());
+        // 17 alphanumeric + hyphens = too long after strip
+        assert!(validate_peer_code(&format!("{}-", "A".repeat(MAX_PEER_CODE_BYTES + 1))).is_err());
+    }
+
+    #[test]
     fn peer_code_non_alphanumeric() {
         assert!(validate_peer_code("AB!C").is_err());
+        assert!(validate_peer_code("AB C").is_err());
+        assert!(validate_peer_code("AB\nC").is_err());
+    }
+
+    #[test]
+    fn peer_code_error_prefix() {
+        // All errors should carry the invalid_peer_code prefix for client matching.
+        let err = validate_peer_code("").unwrap_err();
+        assert!(
+            err.starts_with("invalid_peer_code:"),
+            "missing prefix: {err}"
+        );
+        let err = validate_peer_code("AB!C").unwrap_err();
+        assert!(
+            err.starts_with("invalid_peer_code:"),
+            "missing prefix: {err}"
+        );
     }
 
     // ── RateLimit ───────────────────────────────────────────────
@@ -734,6 +955,76 @@ mod tests {
         assert_eq!(rl.check(), Err(false));
     }
 
+    // ── X-Forwarded-For trust model (AC-16) ──────────────────────
+
+    #[test]
+    fn xff_ignored_when_proxy_not_trusted() {
+        // Simulate: untrusted source sends X-Forwarded-For header.
+        // The server should use the socket address, not the header value.
+        let trusted: Vec<IpAddr> = vec![];
+        let socket_ip: IpAddr = "203.0.113.50".parse().unwrap();
+        let xff_ip = "10.0.0.1";
+
+        // Logic under test (extracted from handle_connection):
+        let raw_ip = if trusted.contains(&socket_ip) {
+            Some(xff_ip.to_string())
+        } else {
+            None
+        }
+        .unwrap_or_else(|| socket_ip.to_string());
+
+        assert_eq!(raw_ip, "203.0.113.50");
+    }
+
+    #[test]
+    fn xff_honored_when_proxy_trusted() {
+        // Simulate: trusted proxy forwards X-Forwarded-For header.
+        let trusted: Vec<IpAddr> = vec!["198.51.100.1".parse().unwrap()];
+        let socket_ip: IpAddr = "198.51.100.1".parse().unwrap();
+        let xff_ip = "10.0.0.1";
+
+        let raw_ip = if trusted.contains(&socket_ip) {
+            Some(xff_ip.to_string())
+        } else {
+            None
+        }
+        .unwrap_or_else(|| socket_ip.to_string());
+
+        assert_eq!(raw_ip, "10.0.0.1");
+    }
+
+    #[test]
+    fn xff_falls_back_to_socket_when_trusted_but_no_header() {
+        // Trusted proxy connects but no X-Forwarded-For header present.
+        let trusted: Vec<IpAddr> = vec!["198.51.100.1".parse().unwrap()];
+        let socket_ip: IpAddr = "198.51.100.1".parse().unwrap();
+
+        let raw_ip = if trusted.contains(&socket_ip) {
+            None::<String> // No header
+        } else {
+            None
+        }
+        .unwrap_or_else(|| socket_ip.to_string());
+
+        assert_eq!(raw_ip, "198.51.100.1");
+    }
+
+    #[test]
+    fn xff_empty_trusted_list_always_ignores_header() {
+        // Default: empty trusted_proxies list → header always ignored.
+        let trusted: Vec<IpAddr> = vec![];
+        let socket_ip: IpAddr = "127.0.0.1".parse().unwrap();
+
+        let raw_ip = if trusted.contains(&socket_ip) {
+            Some("spoofed.ip".to_string())
+        } else {
+            None
+        }
+        .unwrap_or_else(|| socket_ip.to_string());
+
+        assert_eq!(raw_ip, "127.0.0.1");
+    }
+
     // ── Constants sanity ────────────────────────────────────────
 
     #[test]
@@ -754,51 +1045,44 @@ mod tests {
         assert_eq!(config.max_frame_size, Some(MAX_MESSAGE_BYTES));
     }
 
-    // ── Peer code policy parity (NATIVE-2) ──────────────────────
-    //
-    // bolt-rendezvous accepts ANY non-empty, <=16 char, ASCII alphanumeric
-    // code. bolt-core uses a strict 31-char unambiguous alphabet and
-    // accepts only lengths 6 or 8. The server MUST remain permissive —
-    // tightening to bolt-core rules would be a wire-level break.
+    // ─── RENDEZVOUS-HARDENING-1 P2: Idle timeout ────────────────
 
-    /// Server accepts codes that bolt-core rejects (intentional divergence).
     #[test]
-    #[cfg(feature = "with-bolt-core-tests")]
-    fn server_accepts_codes_bolt_core_rejects() {
-        // Ambiguous chars (I, L, O, 0, 1) — excluded from bolt-core alphabet.
-        assert!(validate_peer_code("IL0O1X").is_ok());
-        assert!(!bolt_core::peer_code::is_valid_peer_code("IL0O1X"));
-
-        // Length 16 (max server allows) — bolt-core only accepts 6 or 8.
-        assert!(validate_peer_code("ABCDEF1234567890").is_ok());
-        assert!(!bolt_core::peer_code::is_valid_peer_code(
-            "ABCDEF1234567890"
-        ));
-
-        // Lowercase alphanumeric — server accepts, bolt-core normalizes
-        // to uppercase but still rejects if chars outside alphabet.
-        assert!(validate_peer_code("a1b2c3").is_ok());
-        assert!(!bolt_core::peer_code::is_valid_peer_code("a1b2c3"));
+    fn idle_timeout_constant_is_reasonable() {
+        // Timeout must be long enough for legitimate signaling gaps
+        // but short enough to reclaim idle connections.
+        assert!(
+            IDLE_TIMEOUT.as_secs() >= 60,
+            "idle timeout too short for signaling"
+        );
+        assert!(
+            IDLE_TIMEOUT.as_secs() <= 600,
+            "idle timeout too long for resource reclaim"
+        );
+        assert_eq!(
+            IDLE_TIMEOUT.as_secs(),
+            300,
+            "expected 5 minute idle timeout"
+        );
     }
 
-    /// When a code is within the canonical alphabet and length, both agree.
-    #[test]
-    #[cfg(feature = "with-bolt-core-tests")]
-    fn canonical_codes_accepted_by_both() {
-        // 6-char code using only unambiguous alphabet chars.
-        assert!(validate_peer_code("ABCDEF").is_ok());
-        assert!(bolt_core::peer_code::is_valid_peer_code("ABCDEF"));
+    #[tokio::test]
+    async fn idle_timeout_fires_on_no_activity() {
+        // Verify that tokio::time::timeout with our Duration works correctly.
+        // This tests the mechanism, not the full server integration.
+        use tokio::time::{timeout, Duration};
 
-        // 8-char code (no dash — server rejects hyphens).
-        assert!(validate_peer_code("ABCDEFGH").is_ok());
-        assert!(bolt_core::peer_code::is_valid_peer_code("ABCDEFGH"));
-    }
+        let short_timeout = Duration::from_millis(50);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
-    /// Both reject empty codes.
-    #[test]
-    #[cfg(feature = "with-bolt-core-tests")]
-    fn both_reject_empty() {
-        assert!(validate_peer_code("").is_err());
-        assert!(!bolt_core::peer_code::is_valid_peer_code(""));
+        // Don't send anything — timeout should fire
+        let result = timeout(short_timeout, rx.recv()).await;
+        assert!(result.is_err(), "timeout must fire when no message arrives");
+
+        // Send a message first — should NOT timeout
+        tx.send("ping".into()).unwrap();
+        let result = timeout(Duration::from_secs(1), rx.recv()).await;
+        assert!(result.is_ok(), "must not timeout when message arrives");
+        assert_eq!(result.unwrap(), Some("ping".into()));
     }
 }

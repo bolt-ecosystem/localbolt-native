@@ -6,6 +6,9 @@ Canonical Rust rendezvous server for the Bolt Protocol ecosystem.
 
 A lightweight WebSocket server that handles peer discovery and signal routing for Bolt-based applications. The rendezvous server is **infrastructure**, not a product.
 
+Production cloud endpoint: `wss://bolt-rendezvous.fly.dev` (Fly.io app
+`bolt-rendezvous`).
+
 ## Role in the Ecosystem
 
 - Routes opaque signaling payloads between peers.
@@ -117,7 +120,7 @@ None. Standalone Rust binary.
 - [localbolt](https://github.com/the9ines/localbolt) — via git subtree (offline mode)
 - [localbolt-app](https://github.com/the9ines/localbolt-app) — via git subtree (offline mode)
 
-## Not Bundled By
+## Hosted Consumers
 
 - [localbolt-v3](https://github.com/the9ines/localbolt-v3) — connects to hosted endpoint only
 
