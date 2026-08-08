@@ -17,31 +17,88 @@ pub struct BoltDaemon {
     socket_path: String,
 }
 
+/// How far up from the executable to look for a sibling `bolt-daemon` checkout.
+/// A dev build sits at `<repo>/native/macos/.build/release/LocalBolt`, so the
+/// ecosystem root is 5 levels up; a little headroom covers other layouts without
+/// walking to `/`.
+const DEV_LOOKUP_MAX_ANCESTORS: usize = 8;
+
+/// Ordered candidate paths for the bolt-daemon binary.
+///
+/// Pure: takes the running executable rather than reading the environment, so the
+/// lookup order is unit-testable without touching the filesystem.
+///
+/// Order, highest priority first:
+///   1. `BOLT_DAEMON_PATH` — explicit override, for pointing at any local build.
+///   2. Sibling of the executable — the app-bundle sidecar at
+///      `LocalBolt.app/Contents/MacOS/bolt-daemon`, installed by `build-app.sh`.
+///      This is the only path a shipped install relies on.
+///   3. A sibling `bolt-daemon` checkout, found by walking up from the executable.
+///      This keeps developer builds (`swift build`, no bundle) working without
+///      baking any absolute home directory into the binary.
+pub(crate) fn daemon_candidate_paths(
+    current_exe: Option<&std::path::Path>,
+    explicit_override: Option<&str>,
+) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Some(explicit) = explicit_override {
+        if !explicit.is_empty() {
+            candidates.push(PathBuf::from(explicit));
+        }
+    }
+
+    if let Some(exe_dir) = current_exe.and_then(|p| p.parent()) {
+        // Production: the sidecar inside the app bundle.
+        candidates.push(exe_dir.join("bolt-daemon"));
+
+        // Development: a sibling bolt-daemon checkout somewhere above us. Relative to
+        // the executable, so it never encodes a specific user's home directory.
+        for ancestor in exe_dir.ancestors().take(DEV_LOOKUP_MAX_ANCESTORS) {
+            candidates.push(
+                ancestor
+                    .join("bolt-daemon")
+                    .join("target/release/bolt-daemon"),
+            );
+            candidates.push(ancestor.join("bolt-daemon").join("target/debug/bolt-daemon"));
+        }
+    }
+
+    candidates
+}
+
+/// First candidate that exists on disk, or None.
+pub(crate) fn resolve_daemon_binary(
+    current_exe: Option<&std::path::Path>,
+    explicit_override: Option<&str>,
+) -> Option<PathBuf> {
+    let candidates = daemon_candidate_paths(current_exe, explicit_override);
+    for path in &candidates {
+        if path.exists() {
+            return Some(path.clone());
+        }
+    }
+    eprintln!("[bolt-daemon-lookup] no bolt-daemon binary found. Checked, in order:");
+    for path in &candidates {
+        eprintln!("[bolt-daemon-lookup]   {}", path.display());
+    }
+    None
+}
+
 /// Find the bolt-daemon binary. Searches known paths.
 /// Returns null if not found. Caller must free with bolt_free_string.
 #[no_mangle]
 pub extern "C" fn bolt_daemon_find_binary() -> *mut c_char {
-    let search_paths = vec![
-        // Sibling of this process
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.join("bolt-daemon")))
-            .unwrap_or_default(),
-        // Ecosystem workspace paths
-        PathBuf::from(std::env::var("HOME").unwrap_or_default())
-            .join("Desktop/the9ines.com/bolt-ecosystem/bolt-daemon/target/release/bolt-daemon"),
-    ];
-
-    for path in &search_paths {
-        if path.exists() {
-            if let Some(s) = path.to_str() {
-                return CString::new(s)
-                    .map(|cs| cs.into_raw())
-                    .unwrap_or(std::ptr::null_mut());
-            }
-        }
+    let exe = std::env::current_exe().ok();
+    let explicit = std::env::var("BOLT_DAEMON_PATH").ok();
+    match resolve_daemon_binary(exe.as_deref(), explicit.as_deref()) {
+        Some(path) => path
+            .to_str()
+            .and_then(|s| CString::new(s).ok())
+            .map(|cs| cs.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
+        None => std::ptr::null_mut(),
     }
-    std::ptr::null_mut()
 }
 
 /// Build the argv for spawning bolt-daemon. Extracted so the spawn arguments — in
@@ -536,6 +593,136 @@ pub unsafe extern "C" fn bolt_daemon_stop(handle: *mut BoltDaemon) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Daemon binary lookup ─────────────────────────────────────────────
+    //
+    // Production installs get the daemon as a bundle sidecar at
+    // LocalBolt.app/Contents/MacOS/bolt-daemon (installed by build-app.sh), which the
+    // exe-sibling candidate finds. Developer builds run the bare Swift binary from
+    // .build/release, where there is no sidecar, so the lookup must also find the
+    // sibling bolt-daemon checkout without baking in anyone's home directory.
+
+    /// Unique scratch dir for a lookup test.
+    fn lookup_tmp(tag: &str) -> PathBuf {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "bolt-lookup-{tag}-{}-{n}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn touch_exec(path: &std::path::Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"#!/bin/sh\nexit 0\n").unwrap();
+    }
+
+    /// The stale `~/Desktop/the9ines.com` developer path must not be consulted: the
+    /// ecosystem no longer lives there, and a shipped .app must never depend on a
+    /// path inside someone's home directory.
+    #[test]
+    fn lookup_has_no_stale_desktop_fallback() {
+        let exe = PathBuf::from("/Applications/LocalBolt.app/Contents/MacOS/LocalBolt");
+        let candidates = daemon_candidate_paths(Some(&exe), None);
+
+        for candidate in &candidates {
+            let s = candidate.to_string_lossy();
+            assert!(
+                !s.contains("Desktop/the9ines.com"),
+                "stale Desktop fallback must be gone, found: {s}"
+            );
+        }
+    }
+
+    /// No candidate may hardcode a specific user's home directory.
+    #[test]
+    fn lookup_hardcodes_no_absolute_home() {
+        let exe = PathBuf::from("/Applications/LocalBolt.app/Contents/MacOS/LocalBolt");
+        for candidate in daemon_candidate_paths(Some(&exe), None) {
+            let s = candidate.to_string_lossy();
+            assert!(
+                !s.contains("/Users/oberfelder"),
+                "no candidate may hardcode a developer home: {s}"
+            );
+        }
+    }
+
+    /// Production: the daemon sidecar beside the app executable is found.
+    #[test]
+    fn lookup_finds_bundled_sidecar() {
+        let root = lookup_tmp("bundle");
+        let macos_dir = root.join("LocalBolt.app/Contents/MacOS");
+        let exe = macos_dir.join("LocalBolt");
+        let sidecar = macos_dir.join("bolt-daemon");
+        touch_exec(&exe);
+        touch_exec(&sidecar);
+
+        let found = resolve_daemon_binary(Some(&exe), None);
+
+        assert_eq!(
+            found.as_deref(),
+            Some(sidecar.as_path()),
+            "must find the Contents/MacOS/bolt-daemon sidecar"
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Developer build: running .build/release/LocalBolt from an ecosystem checkout
+    /// must find the sibling bolt-daemon repo's release binary, discovered by walking
+    /// up from the executable rather than from any hardcoded absolute path.
+    #[test]
+    fn lookup_finds_dev_repo_relative_daemon() {
+        let root = lookup_tmp("dev");
+        let exe = root.join("bolt-ecosystem/localbolt-app/native/macos/.build/release/LocalBolt");
+        let daemon = root.join("bolt-ecosystem/bolt-daemon/target/release/bolt-daemon");
+        touch_exec(&exe);
+        touch_exec(&daemon);
+
+        let found = resolve_daemon_binary(Some(&exe), None);
+
+        assert_eq!(
+            found.as_deref(),
+            Some(daemon.as_path()),
+            "must find the sibling bolt-daemon checkout from a dev build"
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// An explicit override wins over everything else, so a developer can point at
+    /// any build without editing source.
+    #[test]
+    fn lookup_explicit_override_wins() {
+        let root = lookup_tmp("override");
+        let macos_dir = root.join("LocalBolt.app/Contents/MacOS");
+        let exe = macos_dir.join("LocalBolt");
+        let sidecar = macos_dir.join("bolt-daemon");
+        let chosen = root.join("custom/bolt-daemon");
+        touch_exec(&exe);
+        touch_exec(&sidecar);
+        touch_exec(&chosen);
+
+        let found = resolve_daemon_binary(Some(&exe), Some(chosen.to_str().unwrap()));
+
+        assert_eq!(
+            found.as_deref(),
+            Some(chosen.as_path()),
+            "explicit override must take priority over the bundled sidecar"
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Nothing found: return None rather than a bogus path.
+    #[test]
+    fn lookup_returns_none_when_absent() {
+        let root = lookup_tmp("absent");
+        let exe = root.join("LocalBolt.app/Contents/MacOS/LocalBolt");
+        touch_exec(&exe);
+
+        assert!(resolve_daemon_binary(Some(&exe), None).is_none());
+        std::fs::remove_dir_all(&root).ok();
+    }
 
     /// The native app must launch bolt-daemon with the fail-closed `ask` pairing
     /// policy, never `allow` (which accepted any LAN peer with no prompt / no SAS).
