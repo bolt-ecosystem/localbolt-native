@@ -415,6 +415,22 @@ fn event_loop(socket_path: &Path, shutdown: &Arc<AtomicBool>) {
     }
 }
 
+/// Map the interactive pairing prompt's raw input to a decision.
+///
+/// Extracted so the affordances are unit-testable without stdin. Anything
+/// unrecognised (including empty input) maps to `DenyOnce`: refuse this session,
+/// persist nothing. Trailing newlines and case are ignored.
+fn parse_pairing_choice(input: &str) -> Decision {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "y" | "yes" => Decision::AllowOnce,
+        // `_always` decisions are what let the daemon persist a pin (Stage B), so
+        // the device is remembered instead of re-prompting on every reconnect.
+        "a" | "always" => Decision::AllowAlways,
+        "d" | "never" => Decision::DenyAlways,
+        _ => Decision::DenyOnce,
+    }
+}
+
 fn handle_event(msg: &IpcMessage, writer: &mut IpcStream) {
     match msg.msg_type.as_str() {
         "version.status" => {
@@ -486,17 +502,21 @@ fn handle_event(msg: &IpcMessage, writer: &mut IpcStream) {
                     "[pairing] request from {} ({})",
                     req.remote_device_name, req.remote_device_type
                 );
-                println!("          SAS: {}", req.sas);
+                // Only offer the code-comparison step when a SAS is actually
+                // present; printing an empty one invited the user to "verify"
+                // nothing.
+                if !req.sas.is_empty() {
+                    println!("          SAS: {}", req.sas);
+                }
                 println!("          capabilities: {:?}", req.capabilities_requested);
 
-                // Interactive prompt
-                eprint!("          Accept? [y/N]: ");
+                // Interactive prompt. `y`/`d` apply to this session only; `a`/`never`
+                // are remembered by the daemon so it stops asking.
+                eprint!("          Accept? [y] once  [a] always  [N] no  [d] never: ");
                 let _ = std::io::stderr().flush();
                 let mut input = String::new();
-                let decision = if std::io::stdin().read_line(&mut input).is_ok()
-                    && input.trim().eq_ignore_ascii_case("y")
-                {
-                    Decision::AllowOnce
+                let decision = if std::io::stdin().read_line(&mut input).is_ok() {
+                    parse_pairing_choice(&input)
                 } else {
                     Decision::DenyOnce
                 };
@@ -815,6 +835,66 @@ fn format_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── R4: the shipped CLI must be able to produce persistent decisions ──
+    //
+    // The daemon persists a pin only for AllowAlways / DenyAlways (Stage B in
+    // bolt-daemon ipc/trust.rs). While this prompt could only emit the _once
+    // variants, `ask` could authorize a session but never remember it, so every
+    // reconnect re-prompted and no pin was ever written.
+
+    #[test]
+    fn pairing_choice_allow_once() {
+        assert_eq!(parse_pairing_choice("y\n"), Decision::AllowOnce);
+        assert_eq!(parse_pairing_choice("Y"), Decision::AllowOnce);
+        assert_eq!(parse_pairing_choice("yes"), Decision::AllowOnce);
+    }
+
+    #[test]
+    fn pairing_choice_allow_always_is_available() {
+        assert_eq!(parse_pairing_choice("a\n"), Decision::AllowAlways);
+        assert_eq!(parse_pairing_choice("A"), Decision::AllowAlways);
+        assert_eq!(parse_pairing_choice("always"), Decision::AllowAlways);
+    }
+
+    #[test]
+    fn pairing_choice_deny_always_is_available() {
+        assert_eq!(parse_pairing_choice("d\n"), Decision::DenyAlways);
+        assert_eq!(parse_pairing_choice("never"), Decision::DenyAlways);
+    }
+
+    #[test]
+    fn pairing_choice_unknown_input_denies_once() {
+        // Fail-closed: anything unrecognised refuses this session and persists nothing.
+        for input in ["", "\n", "n", "no", "maybe", "yolo", "   "] {
+            assert_eq!(
+                parse_pairing_choice(input),
+                Decision::DenyOnce,
+                "input {input:?} must deny once"
+            );
+        }
+    }
+
+    /// The decision must serialize to the exact wire value the daemon matches on.
+    #[test]
+    fn pairing_decision_wire_values() {
+        let wire = |d: Decision| {
+            serde_json::to_value(PairingDecisionPayload {
+                request_id: "req-1".to_string(),
+                decision: d,
+                note: None,
+            })
+            .unwrap()["decision"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+
+        assert_eq!(wire(Decision::AllowOnce), "allow_once");
+        assert_eq!(wire(Decision::AllowAlways), "allow_always");
+        assert_eq!(wire(Decision::DenyOnce), "deny_once");
+        assert_eq!(wire(Decision::DenyAlways), "deny_always");
+    }
 
     #[test]
     fn format_bytes_units() {

@@ -447,6 +447,35 @@ struct PairingRequest: Identifiable {
     let sas: String
 }
 
+/// A user's answer to a pairing request.
+///
+/// `wireValue` must match the daemon's `Decision` serde representation
+/// (snake_case) exactly, or the daemon cannot parse the decision and falls back to
+/// its fail-closed deny. The `_always` cases are the only ones the daemon persists
+/// as a pin; the `_once` cases authorize or refuse this session and persist nothing.
+enum PairingDecision {
+    case allowOnce
+    case allowAlways
+    case denyOnce
+    case denyAlways
+
+    var wireValue: String {
+        switch self {
+        case .allowOnce: return "allow_once"
+        case .allowAlways: return "allow_always"
+        case .denyOnce: return "deny_once"
+        case .denyAlways: return "deny_always"
+        }
+    }
+
+    var isAllow: Bool {
+        switch self {
+        case .allowOnce, .allowAlways: return true
+        case .denyOnce, .denyAlways: return false
+        }
+    }
+}
+
 /// Session trust state (canonical v1: unverified, verified, legacy + M7 mismatch).
 enum TrustState: Equatable {
     case unverified(sas: String)
@@ -756,12 +785,15 @@ final class IpcManager {
     // ── Decisions ────────────────────────────────────────────
 
     /// Send a pairing decision back to the daemon.
-    func sendPairingDecision(requestId: String, accept: Bool) {
+    ///
+    /// The `_always` cases are what allow the daemon to persist a pin (Stage B), so a
+    /// device is remembered rather than re-prompted on every reconnect. The `_once`
+    /// cases authorize this session only and persist nothing.
+    func sendPairingDecision(requestId: String, decision: PairingDecision) {
         guard let h = handle else { return }
 
-        let decision = accept ? "allow_once" : "deny_once"
         let payload = """
-        {"request_id":"\(requestId)","decision":"\(decision)"}
+        {"request_id":"\(requestId)","decision":"\(decision.wireValue)"}
         """
 
         payload.withCString { payloadCStr in
@@ -770,7 +802,7 @@ final class IpcManager {
             }
         }
 
-        if accept, let req = pendingRequest {
+        if decision.isAllow, let req = pendingRequest {
             pendingAcceptPeer = PeerSession(
                 peerCode: req.requestId,
                 deviceName: req.deviceName,

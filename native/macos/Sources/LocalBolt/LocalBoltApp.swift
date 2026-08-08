@@ -1271,24 +1271,53 @@ struct PairingRequestView: View {
                     .multilineTextAlignment(.center)
             }
 
-            HStack(spacing: 16) {
-                Button("Decline") {
-                    ipc.sendPairingDecision(requestId: request.requestId, accept: false)
-                    dismiss()
-                }
-                .buttonStyle(.bordered)
-                .tint(.red)
+            // "Accept" stays the primary action and means this session only.
+            // Remembering a device is a deliberate secondary choice: Accept must
+            // never silently become allow_always.
+            VStack(spacing: 10) {
+                HStack(spacing: 16) {
+                    Button("Decline") {
+                        send(.denyOnce)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
 
-                Button("Accept") {
-                    ipc.sendPairingDecision(requestId: request.requestId, accept: true)
-                    dismiss()
+                    Button("Accept") {
+                        send(.allowOnce)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(neon)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(neon)
+
+                HStack(spacing: 16) {
+                    Button("Never for this device") {
+                        send(.denyAlways)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red.opacity(0.85))
+
+                    Button("Always allow this device") {
+                        send(.allowAlways)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                }
+
+                Text("Remembered choices are saved so this device stops asking.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
             }
         }
         .padding(28)
-        .frame(width: 300)
+        .frame(width: 320)
+    }
+
+    private func send(_ decision: PairingDecision) {
+        ipc.sendPairingDecision(requestId: request.requestId, decision: decision)
+        dismiss()
     }
 }
 

@@ -169,32 +169,57 @@ fn idle(status: &adw::StatusPage, title: &str, description: &str) {
     status.set_icon_name(Some("network-wireless-symbolic"));
 }
 
-/// Prompt to confirm a pairing request — the user verifies the SAS matches the
-/// code shown on the other device, then accepts or declines.
+/// Map an `AlertDialog` response id to the pairing decision it represents.
+///
+/// Extracted from the dialog closure so the affordances are unit-testable without
+/// a display. Anything unrecognised (including the close/Escape response) maps to
+/// `DenyOnce`: refuse this session, persist nothing.
+fn pairing_decision_for_response(response: &str) -> Decision {
+    match response {
+        "accept" => Decision::AllowOnce,
+        // `_always` decisions are what let the daemon persist a pin (Stage B), so
+        // the device is remembered instead of re-prompting on every reconnect.
+        "accept_always" => Decision::AllowAlways,
+        "decline_always" => Decision::DenyAlways,
+        _ => Decision::DenyOnce,
+    }
+}
+
+/// Prompt to confirm a pairing request. When a SAS is present the user compares it
+/// with the other device first. Four outcomes: allow/deny for this session only, or
+/// allow/deny remembered so the daemon stops asking.
 fn show_pairing_dialog(
     window: &adw::ApplicationWindow,
     bridge: &Arc<IpcBridgeCore>,
     req: PairingRequestPayload,
 ) {
-    let body = format!(
-        "{} wants to connect.\n\nConfirm this code matches on both screens:\n\n{}",
-        req.remote_device_name, req.sas
-    );
+    // Only ask the user to compare codes when there is a code to compare. The
+    // daemon does not populate SAS yet, and the old copy told the user to confirm
+    // a match against an empty string.
+    let body = if req.sas.is_empty() {
+        format!("{} wants to connect.", req.remote_device_name)
+    } else {
+        format!(
+            "{} wants to connect.\n\nConfirm this code matches on both screens:\n\n{}",
+            req.remote_device_name, req.sas
+        )
+    };
     let dialog = adw::AlertDialog::new(Some("Connection request"), Some(&body));
+    dialog.add_response("decline_always", "Never");
     dialog.add_response("decline", "Decline");
-    dialog.add_response("accept", "Connect");
+    dialog.add_response("accept_always", "Always Allow");
+    dialog.add_response("accept", "Connect Once");
+    // "Connect Once" stays the default and the only suggested action: remembering a
+    // device is a deliberate extra step, never what Enter does.
     dialog.set_response_appearance("accept", adw::ResponseAppearance::Suggested);
     dialog.set_response_appearance("decline", adw::ResponseAppearance::Destructive);
+    dialog.set_response_appearance("decline_always", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("accept"));
     dialog.set_close_response("decline");
 
     let bridge = Arc::clone(bridge);
     dialog.connect_response(None, move |_, response| {
-        let decision = if response == "accept" {
-            Decision::AllowOnce
-        } else {
-            Decision::DenyOnce
-        };
+        let decision = pairing_decision_for_response(response);
         let payload = serde_json::to_value(PairingDecisionPayload {
             request_id: req.request_id.clone(),
             decision,
@@ -269,4 +294,82 @@ fn human_size(bytes: u64) -> String {
 fn dev_daemon_paths() -> Vec<PathBuf> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../bolt-daemon/target");
     vec![root.join("release/bolt-daemon"), root.join("debug/bolt-daemon")]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── R4: the shipped GTK shell must be able to produce persistent decisions ──
+    //
+    // The daemon persists a pin only for AllowAlways / DenyAlways (Stage B in
+    // bolt-daemon ipc/trust.rs). While this dialog could only emit the _once
+    // variants, `ask` could authorize a session but never remember it, so every
+    // reconnect re-prompted and no pin was ever written.
+
+    #[test]
+    fn response_allow_once() {
+        assert_eq!(
+            pairing_decision_for_response("accept"),
+            Decision::AllowOnce
+        );
+    }
+
+    #[test]
+    fn response_allow_always_is_available() {
+        assert_eq!(
+            pairing_decision_for_response("accept_always"),
+            Decision::AllowAlways
+        );
+    }
+
+    #[test]
+    fn response_deny_always_is_available() {
+        assert_eq!(
+            pairing_decision_for_response("decline_always"),
+            Decision::DenyAlways
+        );
+    }
+
+    #[test]
+    fn response_decline_denies_once() {
+        assert_eq!(
+            pairing_decision_for_response("decline"),
+            Decision::DenyOnce
+        );
+    }
+
+    #[test]
+    fn unknown_or_dismissed_response_denies_once() {
+        // Fail-closed: Escape/close and anything unrecognised refuse this session
+        // and persist nothing.
+        for response in ["", "close", "whatever", "ACCEPT"] {
+            assert_eq!(
+                pairing_decision_for_response(response),
+                Decision::DenyOnce,
+                "response {response:?} must deny once"
+            );
+        }
+    }
+
+    /// The decision must serialize to the exact wire value the daemon matches on.
+    #[test]
+    fn pairing_decision_wire_values() {
+        let wire = |d: Decision| {
+            serde_json::to_value(PairingDecisionPayload {
+                request_id: "req-1".to_string(),
+                decision: d,
+                note: None,
+            })
+            .unwrap()["decision"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+
+        assert_eq!(wire(Decision::AllowOnce), "allow_once");
+        assert_eq!(wire(Decision::AllowAlways), "allow_always");
+        assert_eq!(wire(Decision::DenyOnce), "deny_once");
+        assert_eq!(wire(Decision::DenyAlways), "deny_always");
+    }
 }
