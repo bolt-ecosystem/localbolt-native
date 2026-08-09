@@ -19,7 +19,7 @@ jobs:
       run:
         working-directory: signal
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
@@ -36,7 +36,7 @@ jobs:
       run:
         working-directory: native/shared
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -57,7 +57,7 @@ jobs:
     name: Native macOS Shell (SwiftUI)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Clone bolt-core-sdk (sibling dependency)
         run: git clone --depth 1 https://github.com/bolt-ecosystem/bolt-core-sdk.git "${{ github.workspace }}/../bolt-core-sdk"
@@ -95,7 +95,7 @@ jobs:
     name: Signal Subtree Drift Guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       - name: Read subtree pin
         shell: bash
@@ -106,7 +106,7 @@ jobs:
           echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> "$GITHUB_ENV"
 
       - name: Checkout canonical bolt-rendezvous
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           repository: ${{ env.UPSTREAM_REPO }}
           ref: ${{ env.UPSTREAM_TAG }}
