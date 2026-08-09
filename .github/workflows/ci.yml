@@ -67,6 +67,29 @@ jobs:
       - name: Build SwiftUI shell
         working-directory: native/macos
         run: swift build -c release
+      # `swift build` only produces a bare executable. The shipped app resolves
+      # bolt-daemon next to its own executable, so a bundle assembled without the
+      # sidecar is broken at runtime while every build step still passes. Package
+      # the real .app and assert the sidecar landed.
+      # build-app.sh builds the daemon from ../../../bolt-daemon, which is this
+      # sibling checkout; bolt-daemon in turn path-depends on ../bolt-core-sdk,
+      # already cloned above at the same level.
+      - name: Clone bolt-daemon (app bundle sidecar)
+        run: git clone --depth 1 https://github.com/bolt-ecosystem/bolt-daemon.git "${{ github.workspace }}/../bolt-daemon"
+      - name: Package LocalBolt.app
+        working-directory: native/macos
+        # Ad-hoc signs (CODESIGN_IDENTITY defaults to "-"); no Developer ID needed.
+        # Architecture, static-link and codesign checks already run inside the script.
+        run: bash build-app.sh release
+      - name: Verify .app bundle ships a usable daemon sidecar
+        working-directory: native/macos
+        run: |
+          set -euo pipefail
+          APP="build/LocalBolt.app"
+          test -d "$APP" || { echo "::error::missing bundle $APP"; exit 1; }
+          test -x "$APP/Contents/MacOS/LocalBolt" || { echo "::error::missing app executable"; exit 1; }
+          test -x "$APP/Contents/MacOS/bolt-daemon" || { echo "::error::missing bolt-daemon sidecar"; exit 1; }
+          echo "bundle OK: $(ls -1 "$APP/Contents/MacOS" | tr '\n' ' ')"
 
   subtree-drift-guard:
     name: Signal Subtree Drift Guard
