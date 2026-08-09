@@ -1233,6 +1233,10 @@ struct PairingRequestView: View {
     let ipc: IpcManager
     @Environment(\.dismiss) private var dismiss
 
+    /// Off by default: connecting once is the safe choice, and remembering a device
+    /// is something the person opts into rather than the default outcome.
+    @State private var rememberDevice = false
+
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "person.crop.circle.badge.questionmark")
@@ -1271,48 +1275,47 @@ struct PairingRequestView: View {
                     .multilineTextAlignment(.center)
             }
 
-            // "Accept" stays the primary action and means this session only.
-            // Remembering a device is a deliberate secondary choice: Accept must
-            // never silently become allow_always.
-            VStack(spacing: 10) {
-                HStack(spacing: 16) {
+            // The toggle decides whether Accept is for this time only or lasting, so
+            // there is one obvious primary action instead of four competing buttons.
+            VStack(spacing: 16) {
+                Toggle(isOn: $rememberDevice) {
+                    Text("Remember this device")
+                        .font(.system(size: 13))
+                }
+                .toggleStyle(.checkbox)
+                .help("Connect automatically next time, without asking again.")
+
+                HStack(spacing: 12) {
                     Button("Decline") {
                         send(.denyOnce)
                     }
                     .buttonStyle(.bordered)
-                    .tint(.red)
+                    .controlSize(.large)
 
                     Button("Accept") {
-                        send(.allowOnce)
+                        send(rememberDevice ? .allowAlways : .allowOnce)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                     .tint(neon)
+                    .keyboardShortcut(.defaultAction)
                 }
 
-                HStack(spacing: 16) {
-                    Button("Never for this device") {
-                        send(.denyAlways)
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11))
-                    .foregroundColor(.red.opacity(0.85))
+                Divider()
+                    .padding(.horizontal, 8)
 
-                    Button("Always allow this device") {
-                        send(.allowAlways)
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                Button("Block this device") {
+                    send(.denyAlways)
                 }
-
-                Text("Remembered choices are saved so this device stops asking.")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+                .help("Refuse this device now and every time it tries again.")
             }
         }
         .padding(28)
-        .frame(width: 320)
+        .frame(width: 340)
+        .background(darkBg)
     }
 
     private func send(_ decision: PairingDecision) {
