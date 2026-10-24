@@ -64,6 +64,16 @@ final class DaemonManager {
     var quicAddr: String?
     /// QUIC cert hash hex (set after reading quic_info.json from daemon data_dir).
     var quicCertHash: String?
+    /// `wt_info.json` bytes captured before this daemon was spawned. Identical bytes
+    /// are the previous launch and must not be advertised.
+    private var wtBaselineJSON: String?
+    /// `quic_info.json` bytes captured before this daemon was spawned.
+    private var quicBaselineJSON: String?
+    /// True when `wtUrl` and `wtCertHash` describe this daemon's live listener.
+    var hasLiveWebTransport: Bool {
+        guard let wtUrl, let wtCertHash else { return false }
+        return !wtUrl.isEmpty && !wtCertHash.isEmpty
+    }
     /// True when daemon has an active WT session (detected from stderr).
     /// Latches on "[WT_SESSION]...ACTIVE_SESSION registered", clears on "cleared".
     private(set) var wtSessionActive: Bool = false
@@ -82,6 +92,9 @@ final class DaemonManager {
     func start(wsPort: UInt16 = 0) -> Bool {
         guard let binPath = daemonBinaryPath else { return false }
         guard handle == nil else { return false } // already running
+
+        // Snapshot leftover endpoint files before the child can overwrite them.
+        captureTransportBaseline()
 
         handle = binPath.withCString { cPath in
             bolt_daemon_start(cPath, wsPort)
@@ -125,6 +138,64 @@ final class DaemonManager {
         socketPath = ""
         dataDir = ""
         recentStderr = ""
+        clearAdvertisedTransport()
+    }
+
+    /// Copies of the values the startup poll needs. Taken on the main thread so the
+    /// wait does not read DaemonManager concurrently with its stderr timer.
+    func wtWaitSnapshot() -> (dataDir: String, wsPort: UInt16, baseline: String?) {
+        (dataDir, wsPort, wtBaselineJSON)
+    }
+
+    /// Re-read wt_info.json and quic_info.json and keep only records this daemon wrote.
+    /// Call this immediately before advertising endpoints in a signaling payload.
+    func refreshAdvertisedTransport(host: String) {
+        guard isRunning, wsPort > 0, !dataDir.isEmpty else {
+            clearAdvertisedTransport()
+            return
+        }
+        let wtJSON = TransportMetadataFile.read(dataDir: dataDir, name: "wt_info.json")
+        if let wt = BoltBridge.selectWt(
+            currentJSON: wtJSON,
+            baselineJSON: wtBaselineJSON,
+            wsPort: wsPort,
+            host: host
+        ) {
+            if wtUrl != wt.url || wtCertHash != wt.certHash {
+                print("[WT] advertising \(wt.url)")
+            }
+            wtUrl = wt.url
+            wtCertHash = wt.certHash
+        } else {
+            if wtUrl != nil || wtCertHash != nil {
+                print("[WT] not advertising WebTransport — listener metadata is missing or stale")
+            }
+            wtUrl = nil
+            wtCertHash = nil
+        }
+
+        let quicJSON = TransportMetadataFile.read(dataDir: dataDir, name: "quic_info.json")
+        if let quic = BoltBridge.selectQuic(
+            currentJSON: quicJSON,
+            baselineJSON: quicBaselineJSON,
+            wsPort: wsPort,
+            host: host
+        ) {
+            quicAddr = quic.url
+            quicCertHash = quic.certHash
+        } else {
+            quicAddr = nil
+            quicCertHash = nil
+        }
+    }
+
+    private func captureTransportBaseline() {
+        let dir = BoltBridge.platformDataDir()
+        wtBaselineJSON = TransportMetadataFile.read(dataDir: dir, name: "wt_info.json")
+        quicBaselineJSON = TransportMetadataFile.read(dataDir: dir, name: "quic_info.json")
+    }
+
+    private func clearAdvertisedTransport() {
         wtUrl = nil
         wtCertHash = nil
         quicAddr = nil
@@ -250,6 +321,7 @@ final class DaemonManager {
             handle = nil
             pid = 0
             wsPort = 0
+            clearAdvertisedTransport()
         }
     }
 
@@ -264,7 +336,8 @@ final class DaemonManager {
 struct DiscoveredPeer: Identifiable {
     let id: String // peer_code
     let peerCode: String
-    let deviceName: String
+    /// Human name from signaling. Updated when a later event replaces a bind address.
+    var deviceName: String
     let deviceType: String
     /// WebTransport URL (nil if peer doesn't support WT).
     let wtUrl: String?
@@ -289,6 +362,8 @@ final class SignalingManager {
     var incomingConnectionRequest: IncomingSignal? = nil
     /// Set true when remote peer declines connection (consumed by ContentView to clear connecting state).
     var connectionDeclined: Bool = false
+    /// Transient notice for a connection that cannot proceed (for example no live WT listener).
+    var userNotice: String?
 
     private var handle: OpaquePointer?
     private var pollTimer: Timer?
@@ -319,7 +394,7 @@ final class SignalingManager {
 
         handle = peerCode.withCString { codeCStr in
             localUrl.withCString { localCStr in
-                let deviceName = Host.current().localizedName ?? "Mac"
+                let deviceName = LocalDeviceName.current()
                 return deviceName.withCString { nameCStr in
                     // Nest optional withCString calls to keep pointers alive
                     if let cloud = cloudUrl, let wtu = wtUrl, let wth = wtCertHash {
@@ -380,6 +455,17 @@ final class SignalingManager {
         }
         isConnected = false
         peers = []
+        userNotice = nil
+    }
+
+    /// Remember a real device name learned from a connection payload when the
+    /// discovery list still has a bind address.
+    func notePeerDeviceName(peerCode: String, advertised: String) {
+        guard let idx = peers.firstIndex(where: { $0.peerCode == peerCode }) else { return }
+        let preferred = BoltBridge.preferDeviceName(current: peers[idx].deviceName, candidate: advertised)
+        if preferred != peers[idx].deviceName {
+            peers[idx].deviceName = preferred
+        }
     }
 
     private func poll() {
@@ -413,7 +499,9 @@ final class SignalingManager {
             if let peerPtr = bolt_signaling_get_peer(h, i) {
                 let peer = peerPtr.pointee
                 let code = peer.peer_code.map { String(cString: $0) } ?? ""
-                let name = peer.device_name.map { String(cString: $0) } ?? ""
+                let ffiName = peer.device_name.map { String(cString: $0) } ?? ""
+                let learned = peers.first(where: { $0.peerCode == code })?.deviceName ?? ""
+                let name = BoltBridge.preferDeviceName(current: ffiName, candidate: learned)
                 let type = peer.device_type.map { String(cString: $0) } ?? ""
                 let rawWtUrl = peer.wt_url
                 let rawWtHash = peer.wt_cert_hash
@@ -426,7 +514,11 @@ final class SignalingManager {
                 bolt_peer_free(peerPtr)
             }
         }
-        if updated.count != peers.count || !updated.map(\.id).elementsEqual(peers.map(\.id)) {
+        let changed = updated.count != peers.count
+            || zip(updated, peers).contains {
+                $0.peerCode != $1.peerCode || $0.deviceName != $1.deviceName || $0.deviceType != $1.deviceType
+            }
+        if changed {
             peers = updated
         }
     }

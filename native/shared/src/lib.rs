@@ -26,6 +26,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
+mod advertise_policy;
 mod daemon;
 mod ipc;
 mod signaling;

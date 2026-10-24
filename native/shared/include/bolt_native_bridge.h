@@ -29,6 +29,39 @@ int bolt_probe_signal_health(void);
 /// Free a string returned by any bolt_ function.
 void bolt_free_string(char* ptr);
 
+/// Live WebTransport endpoint from wt_info.json, or null when the file is missing,
+/// unchanged from the pre-spawn baseline, or not this daemon's WS+1 port.
+/// Returned JSON is `{"url":"https://host:port","certHash":"...","port":N}`.
+/// `baseline_json` may be null when the file did not exist before spawn.
+/// Caller frees a non-null return with bolt_free_string.
+char* bolt_select_wt_advertisement(
+    const char* current_json,
+    const char* baseline_json,
+    uint16_t ws_port,
+    const char* host
+);
+
+/// Live QUIC endpoint from quic_info.json, or null for the same reasons as
+/// bolt_select_wt_advertisement. `url` is `host:port` (WS+2, no scheme).
+/// Caller frees a non-null return with bolt_free_string.
+char* bolt_select_quic_advertisement(
+    const char* current_json,
+    const char* baseline_json,
+    uint16_t ws_port,
+    const char* host
+);
+
+/// 1 when `name` is blank or a bind address (`0.0.0.0`, `::`, `0.0.0.0:port`).
+int bolt_device_name_is_unusable(const char* name);
+
+/// Name to show in the UI. Bind addresses and blanks become "Mac".
+/// Caller frees with bolt_free_string.
+char* bolt_device_display_name(const char* raw);
+
+/// Keep a usable `current`. Replace an unusable `current` with a usable `candidate`.
+/// Caller frees with bolt_free_string.
+char* bolt_prefer_device_name(const char* current, const char* candidate);
+
 // ── Daemon Lifecycle ────────────────────────────────────────
 
 /// Opaque daemon handle.
