@@ -105,6 +105,18 @@ uint32_t bolt_daemon_pid(BoltDaemon* handle);
 /// Caller must free with bolt_free_string.
 char* bolt_daemon_recent_stderr(BoltDaemon* handle, uint32_t last_n);
 
+/// Parse a bolt-daemon stderr tail for the WebTransport session latch.
+///
+/// Browser peers do not produce `session.connected` on IPC. The shell must
+/// read stderr instead. Returned JSON is
+/// `{"active":true|false|null,"sas":"XXXXXX"|null}`. `active` is null when
+/// this tail has no lifecycle line (the caller keeps its latch). A live
+/// session is `[WT_SESSION] … session established` or
+/// `[SESSION] … active session handle registered`, not the string
+/// `ACTIVE_SESSION registered`. Caller frees a non-null return with
+/// bolt_free_string.
+char* bolt_parse_wt_session_stderr(const char* stderr_tail);
+
 /// Get the daemon's IPC socket path. Caller must free with bolt_free_string.
 char* bolt_daemon_socket_path(BoltDaemon* handle);
 
