@@ -30,6 +30,7 @@ mod advertise_policy;
 mod daemon;
 mod ipc;
 mod signaling;
+mod wt_session_log;
 pub use daemon::*;
 pub use ipc::*;
 pub use signaling::*;

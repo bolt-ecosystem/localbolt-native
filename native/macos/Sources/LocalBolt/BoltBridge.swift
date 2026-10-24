@@ -41,6 +41,23 @@ enum BoltBridge {
         bolt_free_string(ptr)
         return path
     }
+
+    /// Latest WebTransport lifecycle in a daemon stderr tail.
+    /// `active` is nil when the tail has no lifecycle line.
+    static func parseWtSessionTail(_ stderr: String) -> (active: Bool?, sas: String?) {
+        stderr.withCString { ptr in
+            guard let out = bolt_parse_wt_session_stderr(ptr) else {
+                return (nil, nil)
+            }
+            defer { bolt_free_string(out) }
+            guard let data = String(cString: out).data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return (nil, nil) }
+            let active = obj["active"] as? Bool
+            let sas = (obj["sas"] as? String).flatMap { $0.count == 6 ? $0 : nil }
+            return (active, sas)
+        }
+    }
 }
 
 // ── Daemon Lifecycle ────────────────────────────────────────
@@ -74,8 +91,13 @@ final class DaemonManager {
         guard let wtUrl, let wtCertHash else { return false }
         return !wtUrl.isEmpty && !wtCertHash.isEmpty
     }
-    /// True when daemon has an active WT session (detected from stderr).
-    /// Latches on "[WT_SESSION]...ACTIVE_SESSION registered", clears on "cleared".
+    /// True when daemon stderr shows a live session the shell must surface.
+    ///
+    /// WebTransport answerers do not emit `session.connected`. bolt-daemon prints
+    /// `[WT_SESSION] … session established` and `[SESSION] … active session handle registered`,
+    /// then `[SESSION] … active session handle cleared`. It does not print
+    /// `ACTIVE_SESSION registered`. The latch stays up after that line scrolls
+    /// out of the tail, and drops only on a later clear.
     private(set) var wtSessionActive: Bool = false
     /// SAS code extracted from daemon stderr "[SAS] XXXXXX" for WT sessions.
     private(set) var wtSessionSAS: String? = nil
@@ -139,6 +161,34 @@ final class DaemonManager {
         dataDir = ""
         recentStderr = ""
         clearAdvertisedTransport()
+    }
+
+    /// Apply one stderr tail. `active == nil` means the tail has no lifecycle line.
+    ///
+    /// SAS is published before the active flag so a view that observes the flag
+    /// already sees the code. A clear only drops a latch that was up; a tail
+    /// with no token leaves the latch alone.
+    private func applyWtSessionTail(_ tail: String) {
+        let parsed = BoltBridge.parseWtSessionTail(tail)
+        switch parsed.active {
+        case .some(true):
+            if let sas = parsed.sas, wtSessionSAS != sas {
+                wtSessionSAS = sas
+                print("[DAEMON-POLL] WT SAS extracted: \(sas)")
+            }
+            if !wtSessionActive {
+                wtSessionActive = true
+                print("[DAEMON-POLL] WT session detected from stderr")
+            }
+        case .some(false):
+            if wtSessionActive || wtSessionSAS != nil {
+                wtSessionActive = false
+                wtSessionSAS = nil
+                print("[DAEMON-POLL] WT session ended (stderr)")
+            }
+        case .none:
+            break
+        }
     }
 
     /// Copies of the values the startup poll needs. Taken on the main thread so the
@@ -266,50 +316,15 @@ final class DaemonManager {
             isRunning = running
         }
 
-        if let ptr = bolt_daemon_recent_stderr(h, 30) {
-            recentStderr = String(cString: ptr)
+        // The bridge keeps up to 1000 stderr lines. Read the whole ring so a
+        // burst of handshake or transfer logs cannot push the session line out
+        // before this poll. Diagnostics still show only the tail.
+        if let ptr = bolt_daemon_recent_stderr(h, 1000) {
+            let tail = String(cString: ptr)
             bolt_free_string(ptr)
-        }
-
-        // Detect WT session lifecycle from daemon stderr.
-        // The bridge exposes a rolling tail, so parse in order and honor only
-        // the latest lifecycle token. Otherwise stale "cleared" or "[SAS]"
-        // lines from a previous session can poison reconnect state.
-        var latestWtLifecycle: Bool?
-        var pendingSas: String?
-        var latestRegisteredSas: String?
-        for line in recentStderr.split(separator: "\n") {
-            if let range = line.range(of: "[SAS] ") {
-                let candidate = String(line[range.upperBound...]).prefix(6)
-                if candidate.count == 6 {
-                    pendingSas = String(candidate)
-                }
-            }
-            if line.contains("ACTIVE_SESSION registered") {
-                latestWtLifecycle = true
-                latestRegisteredSas = pendingSas
-            } else if line.contains("ACTIVE_SESSION cleared") {
-                latestWtLifecycle = false
-                latestRegisteredSas = nil
-            }
-        }
-
-        if let latestWtLifecycle {
-            if latestWtLifecycle {
-                if !wtSessionActive {
-                    wtSessionActive = true
-                    wtSessionSAS = nil
-                    print("[DAEMON-POLL] WT session detected from stderr")
-                }
-                if let sas = latestRegisteredSas, wtSessionSAS != sas {
-                    wtSessionSAS = sas
-                    print("[DAEMON-POLL] WT SAS extracted: \(sas)")
-                }
-            } else if wtSessionActive {
-                wtSessionActive = false
-                wtSessionSAS = nil
-                print("[DAEMON-POLL] WT session ended (stderr)")
-            }
+            applyWtSessionTail(tail)
+            let lines = tail.split(separator: "\n", omittingEmptySubsequences: false)
+            recentStderr = lines.suffix(40).joined(separator: "\n")
         }
 
         // Auto-cleanup if daemon died

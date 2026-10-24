@@ -268,18 +268,17 @@ struct ContentView: View {
                 transferStartTime = nil
             }
         }
-        // WT session detection: daemon stderr indicates session up, but IPC
-        // events are not emitted for WebTransport sessions. Advance the
-        // state machine here so the UI reflects the connected session.
+        // WebTransport answerers do not emit daemon://session-connected. The
+        // shell latches daemon stderr instead. `task(id:)` also runs when the
+        // latch was already set before this view subscribed (session up while
+        // the pairing sheet was on screen).
+        .task(id: daemon.wtSessionActive) {
+            promoteLiveWtSession()
+        }
         .onChange(of: daemon.wtSessionActive) {
-            if daemon.wtSessionActive && ipc.sessionPhase == .connecting {
-                if ipc.markConnected() {
-                    ipc.adoptConnectedPeer(identityKey: nil)
-                    applyWtVerificationCode(daemon.wtSessionSAS)
-                    print("[WT-DETECT] Advanced to .connected from daemon stderr")
-                }
-            }
-            if !daemon.wtSessionActive && ipc.sessionPhase == .connected {
+            if daemon.wtSessionActive {
+                promoteLiveWtSession()
+            } else if ipc.sessionPhase == .connected {
                 ipc.disconnectSession(reason: "WT session ended")
                 print("[WT-DETECT] WT session ended — disconnected")
             }
@@ -290,8 +289,37 @@ struct ContentView: View {
         }
     }
 
+    /// Leave Establishing once the daemon's WebTransport session is up.
+    ///
+    /// Acceptor flow is already `.connecting` after the signaling Accept.
+    /// The initiator can still be `.requesting` if `connection_accepted` has
+    /// not been applied yet; the daemon session is the source of truth then.
+    /// `.incomingRequest` is left alone so a handshake cannot skip Decline.
+    private func promoteLiveWtSession() {
+        guard daemon.wtSessionActive else { return }
+        if ipc.sessionPhase == .requesting {
+            _ = ipc.beginConnecting()
+        }
+        guard ipc.sessionPhase == .connecting, ipc.markConnected() else { return }
+        ipc.adoptConnectedPeer(identityKey: nil)
+        applyWtVerificationCode(daemon.wtSessionSAS)
+        print("[WT-DETECT] Advanced to .connected from daemon stderr")
+    }
+
     private func applyWtVerificationCode(_ sas: String?) {
         guard let sas, ipc.sessionPhase == .connected else { return }
+        // A second observer (task + onChange, or a later tail) must not bounce
+        // an in-session approval or a mismatch alert back to unverified.
+        if let trust = ipc.connectedPeer?.trust {
+            switch trust {
+            case .verified, .mismatch(_, _):
+                return
+            case .unverified(let current) where current == sas:
+                return
+            case .unverified(_), .legacy:
+                break
+            }
+        }
         // Item-6 / pre-EA1: no reconnect auto-trust — always surface the SAS as
         // unverified for user review; a stored pin never skips it.
         ipc.connectedPeer?.trust = .unverified(sas: sas)
