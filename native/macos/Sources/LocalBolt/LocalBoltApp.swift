@@ -8,6 +8,7 @@ private let darkBg = Color(red: 0.08, green: 0.08, blue: 0.08)
 private let darkAccent = Color(red: 0.12, green: 0.12, blue: 0.12)
 
 /// Get the local LAN IP address for wsUrl in signaling payloads.
+/// Skips the wildcard bind address. Advertising `0.0.0.0` is not a reachable host.
 private func localIPAddress() -> String {
     var address = "127.0.0.1"
     var ifaddr: UnsafeMutablePointer<ifaddrs>?
@@ -21,11 +22,17 @@ private func localIPAddress() -> String {
         var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
         getnameinfo(ptr.pointee.ifa_addr, socklen_t(sa.sa_len),
                     &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
-        address = String(cString: hostname)
+        let candidate = String(cString: hostname)
+        if !BoltBridge.hostIsUsable(candidate) { continue }
+        address = candidate
         break
     }
     return address
 }
+
+/// Browser peers dial our WebTransport listener. Without a live one, accepting
+/// or waiting just hangs. Native peers still have `wsUrl`.
+private let wtListenerNotReadyNotice = "WebTransport isn't ready on this Mac yet, so the browser can't connect. Wait a moment and try again."
 
 /// UI-only connecting animation phase (product-specific, not canonical).
 enum ConnectingPhase {
@@ -66,6 +73,9 @@ struct LocalBoltApp: App {
 
     /// Wire incoming signal handler so connection_request signals surface as pairing requests.
     private func wireSignalingHandler() {
+        ipc.advertisedPeerLookup = { [signaling] in
+            signaling.preferredInFlightIdentity()
+        }
         signaling.onIncomingSignal = { [self] signal in
             switch signal.signalType {
             case "connection_request":
@@ -75,6 +85,7 @@ struct LocalBoltApp: App {
                 }
                 let deviceName = signal.data["deviceName"] as? String ?? "Unknown Device"
                 let deviceType = signal.data["deviceType"] as? String ?? "desktop"
+                signaling.notePeerDeviceName(peerCode: signal.from, advertised: deviceName)
                 var requestData = signal.data
                 requestData["deviceName"] = deviceName
                 requestData["deviceType"] = deviceType
@@ -84,22 +95,31 @@ struct LocalBoltApp: App {
                     data: requestData
                 )
             case "connection_accepted":
+                let wsUrl = signal.data["wsUrl"] as? String ?? ""
+                if wsUrl.isEmpty {
+                    // Browser peer accepted — no wsUrl (browsers can't host a WS server).
+                    // They dial the wtUrl we put in connection_request. If that listener
+                    // isn't live, fail now instead of sitting in .connecting.
+                    daemon.refreshAdvertisedTransport(host: localIPAddress())
+                    guard daemon.hasLiveWebTransport else {
+                        print("[CONNECT] connection_accepted without wsUrl and no live WebTransport listener — aborting")
+                        ipc.resetSession()
+                        signaling.userNotice = wtListenerNotReadyNotice
+                        return
+                    }
+                }
                 guard ipc.beginConnecting() else {
                     print("[CONNECT] ignoring connection_accepted while sessionPhase=\(String(describing: ipc.sessionPhase))")
                     return
                 }
-                if let wsUrl = signal.data["wsUrl"] as? String, !wsUrl.isEmpty {
+                if !wsUrl.isEmpty {
                     daemon.connectToRemote(
                         wsUrl: wsUrl,
                         quicAddr: signal.data["quicAddr"] as? String,
                         quicCertHash: signal.data["quicCertHash"] as? String
                     )
                 } else {
-                    // Browser peer accepted — no wsUrl (browsers can't host a WS server).
-                    // Stay in .connecting and wait for the browser to connect back to our
-                    // daemon's WebTransport endpoint. The WT session detection in
-                    // onChange(of: daemon.wtSessionActive) will advance to .connected.
-                    print("[CONNECT] connection_accepted without wsUrl — waiting for inbound WT session from browser")
+                    print("[CONNECT] connection_accepted without wsUrl — waiting for inbound WT session from browser at \(daemon.wtUrl ?? "")")
                 }
             case "connection_declined":
                 // Remote peer declined — M2 onChange handler shows notice + resets
@@ -113,36 +133,28 @@ struct LocalBoltApp: App {
     private func autoStart() {
         guard daemon.daemonBinaryPath != nil, !daemon.isRunning else { return }
         daemon.start()
-        let wtInfoPath = "\(daemon.dataDir)/wt_info.json"
-        let quicInfoPath = "\(daemon.dataDir)/quic_info.json"
+        let snapshot = daemon.wtWaitSnapshot()
         let pollInterval: TimeInterval = 0.25
-        let maxAttempts = 20 // 5s total timeout
+        let maxAttempts = 20 // 5s — wait until THIS launch rewrites wt_info.json
         DispatchQueue.global(qos: .utility).async {
             var attempts = 0
             while attempts < maxAttempts {
-                if FileManager.default.fileExists(atPath: wtInfoPath) {
+                let current = TransportMetadataFile.read(dataDir: snapshot.dataDir, name: "wt_info.json")
+                // A placeholder host only checks that the file is live. The URL
+                // advertised to peers is built on the main thread from the LAN address.
+                if BoltBridge.selectWt(
+                    currentJSON: current,
+                    baselineJSON: snapshot.baseline,
+                    wsPort: snapshot.wsPort,
+                    host: "10.0.0.1"
+                ) != nil {
                     break
                 }
                 attempts += 1
                 Thread.sleep(forTimeInterval: pollInterval)
             }
             DispatchQueue.main.async {
-                // Read WT metadata (best-effort — nil values are safe)
-                if let data = try? Data(contentsOf: URL(fileURLWithPath: wtInfoPath)),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    if let port = json["wt_port"] as? Int {
-                        self.daemon.wtUrl = "https://\(localIPAddress()):\(port)"
-                    }
-                    self.daemon.wtCertHash = json["wt_cert_hash"] as? String
-                }
-                // Read QUIC metadata for native app-to-app routing; WS remains fallback.
-                if let data = try? Data(contentsOf: URL(fileURLWithPath: quicInfoPath)),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    if let port = json["quic_port"] as? Int {
-                        self.daemon.quicAddr = "\(localIPAddress()):\(port)"
-                    }
-                    self.daemon.quicCertHash = json["quic_cert_hash"] as? String
-                }
+                self.daemon.refreshAdvertisedTransport(host: localIPAddress())
                 self.signaling.start(
                     localUrl: "ws://127.0.0.1:3001",
                     cloudUrl: "wss://bolt-rendezvous.fly.dev",
@@ -239,6 +251,15 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: signaling.userNotice) {
+            guard let notice = signaling.userNotice else { return }
+            clearConnectingUI()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                if signaling.userNotice == notice {
+                    signaling.userNotice = nil
+                }
+            }
+        }
         // S6: Track transfer start time for incoming receives
         .onChange(of: ipc.transferPhase.isActive) {
             if ipc.transferPhase.isActive && transferStartTime == nil {
@@ -252,22 +273,11 @@ struct ContentView: View {
         // state machine here so the UI reflects the connected session.
         .onChange(of: daemon.wtSessionActive) {
             if daemon.wtSessionActive && ipc.sessionPhase == .connecting {
-                _ = ipc.markConnected()
-                if let pending = ipc.pendingAcceptPeer {
-                    ipc.connectedPeer = pending
-                    ipc.pendingAcceptPeer = nil
-                } else if let target = ipc.pendingInitiatorPeer {
-                    ipc.connectedPeer = PeerSession(
-                        peerCode: target.peerCode,
-                        deviceName: target.deviceName,
-                        deviceType: target.deviceType,
-                        trust: .legacy,
-                        identityKeyB64: nil
-                    )
-                    ipc.pendingInitiatorPeer = nil
+                if ipc.markConnected() {
+                    ipc.adoptConnectedPeer(identityKey: nil)
+                    applyWtVerificationCode(daemon.wtSessionSAS)
+                    print("[WT-DETECT] Advanced to .connected from daemon stderr")
                 }
-                applyWtVerificationCode(daemon.wtSessionSAS)
-                print("[WT-DETECT] Advanced to .connected from daemon stderr")
             }
             if !daemon.wtSessionActive && ipc.sessionPhase == .connected {
                 ipc.disconnectSession(reason: "WT session ended")
@@ -361,6 +371,21 @@ struct ContentView: View {
                 }
             case .idle, .disconnected:
                 discoveryContent
+            }
+
+            if let notice = signaling.userNotice {
+                Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 12))
+                        .foregroundColor(.yellow.opacity(0.8))
+                    Text(notice)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.6))
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
             }
 
             // M2: Declined-by-remote inline notice
@@ -510,7 +535,7 @@ struct ContentView: View {
                     .foregroundColor(.white.opacity(0.4))
                     .frame(width: 20)
                 // S1: Device name only — peer code removed for cleaner discovery
-                Text(peer.deviceName)
+                Text(BoltBridge.displayDeviceName(peer.deviceName))
                     .font(.system(size: 13))
                     .foregroundColor(.white.opacity(0.8))
                 Spacer()
@@ -546,14 +571,14 @@ struct ContentView: View {
             VStack(spacing: 4) {
                 switch connectingPhase {
                 case .requesting:
-                    Text("Waiting for **\(target.deviceName)** to accept...")
+                    Text("Waiting for **\(BoltBridge.displayDeviceName(target.deviceName))** to accept...")
                         .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.8))
                     Text("The other device will be asked to confirm")
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.3))
                 case .establishing:
-                    Text("Establishing secure connection with **\(target.deviceName)**...")
+                    Text("Establishing secure connection with **\(BoltBridge.displayDeviceName(target.deviceName))**...")
                         .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.8))
                     Text("Setting up encrypted channel")
@@ -561,7 +586,7 @@ struct ContentView: View {
                         .foregroundColor(.white.opacity(0.3))
                 case .slow:
                     // S2: Actionable slow-connection copy
-                    Text("Still connecting to **\(target.deviceName)**...")
+                    Text("Still connecting to **\(BoltBridge.displayDeviceName(target.deviceName))**...")
                         .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.8))
                     Text("Check that both devices are on the same network")
@@ -604,7 +629,7 @@ struct ContentView: View {
             }
             .padding(.top, 8)
 
-            Text("Establishing secure connection with **\(deviceName)**...")
+            Text("Establishing secure connection with **\(BoltBridge.displayDeviceName(deviceName))**...")
                 .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.8))
                 .multilineTextAlignment(.center)
@@ -628,8 +653,10 @@ struct ContentView: View {
     // MARK: - Incoming Request (inline)
 
     private func incomingRequestContent(request: IncomingSignal) -> some View {
-        let deviceName = request.data["deviceName"] as? String ?? "Unknown Device"
-        let deviceType = request.data["deviceType"] as? String ?? "desktop"
+        let advertisedName = request.data["deviceName"] as? String ?? ""
+        let advertisedType = request.data["deviceType"] as? String ?? ""
+        let deviceName = BoltBridge.displayDeviceName(advertisedName)
+        let deviceType = BoltBridge.deviceTypeIsPlaceholder(advertisedType) ? "desktop" : advertisedType
 
         return VStack(spacing: 12) {
             HStack(spacing: 10) {
@@ -664,14 +691,24 @@ struct ContentView: View {
                 .tint(.red.opacity(0.8))
 
                 Button(action: {
+                    let host = localIPAddress()
+                    daemon.refreshAdvertisedTransport(host: host)
+                    let requesterWs = request.data["wsUrl"] as? String ?? ""
+                    if requesterWs.isEmpty && !daemon.hasLiveWebTransport {
+                        signaling.incomingConnectionRequest = nil
+                        ipc.resetSession()
+                        signaling.userNotice = wtListenerNotReadyNotice
+                        print("[CONNECT] refusing browser accept — no live WebTransport listener")
+                        return
+                    }
                     let wsPort = daemon.wsPort
-                    let wsUrl = "ws://\(localIPAddress()):\(wsPort)"
+                    let wsUrl = "ws://\(host):\(wsPort)"
                     // Stash peer info before accepting so a fast inbound session
                     // can resolve the connected peer deterministically.
                     ipc.pendingAcceptPeer = PeerSession(
                         peerCode: request.from,
-                        deviceName: deviceName,
-                        deviceType: deviceType,
+                        deviceName: advertisedName,
+                        deviceType: advertisedType,
                         trust: .legacy,
                         identityKeyB64: nil // resolved on session-connected
                     )
@@ -715,7 +752,7 @@ struct ContentView: View {
                     .font(.system(size: 20))
                     .foregroundColor(neon)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(peer.deviceName)
+                    Text(BoltBridge.displayDeviceName(peer.deviceName))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white.opacity(0.9))
                     trustLabel(peer: peer)
@@ -736,7 +773,7 @@ struct ContentView: View {
                         ipc.disconnectSession(reason: "user initiated")
                     }
                 } message: {
-                    Text("This will end the secure session with \(peer.deviceName).")
+                    Text("This will end the secure session with \(BoltBridge.displayDeviceName(peer.deviceName)).")
                 }
             }
             .padding(.horizontal, 16)
@@ -1124,9 +1161,12 @@ struct ContentView: View {
         }
 
         // Send connection_request with wsUrl plus optional WT/QUIC metadata.
+        // Re-read the daemon's endpoint files so a leftover wt_info.json cannot be advertised.
+        let host = localIPAddress()
+        daemon.refreshAdvertisedTransport(host: host)
         let wsPort = daemon.wsPort
-        let wsUrl = "ws://\(localIPAddress()):\(wsPort)"
-        let deviceName = Host.current().localizedName ?? "Mac"
+        let wsUrl = "ws://\(host):\(wsPort)"
+        let deviceName = LocalDeviceName.current()
         var payloadDict: [String: String] = [
             "deviceName": deviceName,
             "deviceType": "desktop",
@@ -1237,6 +1277,17 @@ struct PairingRequestView: View {
     /// is something the person opts into rather than the default outcome.
     @State private var rememberDevice = false
 
+    /// Socket labels from the daemon (`0.0.0.0:0`, `192.168.4.25:55170`) render as "Mac"
+    /// only when signaling never advertised a real name.
+    private var nameLabel: String {
+        BoltBridge.displayDeviceName(request.deviceName)
+    }
+
+    /// The daemon sends `unknown`. Hide that placeholder; show laptop/desktop when known.
+    private var typeLabel: String {
+        BoltBridge.displayDeviceType(request.deviceType)
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "person.crop.circle.badge.questionmark")
@@ -1248,11 +1299,13 @@ struct PairingRequestView: View {
                 .fontWeight(.bold)
 
             VStack(spacing: 4) {
-                Text(request.deviceName)
+                Text(nameLabel)
                     .font(.system(size: 15, weight: .semibold))
-                Text(request.deviceType)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                if !typeLabel.isEmpty {
+                    Text(typeLabel)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
             }
 
             if !request.sas.isEmpty {

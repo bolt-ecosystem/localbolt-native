@@ -8,6 +8,8 @@ use bolt_app_core::signaling_client::{
     self, DiscoveryEvent, PeerInfo, Plane, SignalingConfig, SignalingHandle,
 };
 
+use crate::advertise_policy::prefer_device_name;
+
 /// Discovered peer (C-compatible).
 #[repr(C)]
 pub struct BoltPeer {
@@ -122,26 +124,18 @@ pub unsafe extern "C" fn bolt_signaling_start(
             match &event {
                 DiscoveryEvent::PeerList(list, _plane) => {
                     let mut p = peers_cb.lock().unwrap();
-                    // Merge, skip self
+                    // Merge, skip self. A later sighting can replace a bind-address
+                    // name (0.0.0.0) with the peer's real device name.
                     for peer in list {
-                        if peer.peer_code != code_clone
-                            && !p
-                                .iter()
-                                .any(|existing| existing.peer_code == peer.peer_code)
-                        {
-                            p.push(peer.clone());
+                        if peer.peer_code != code_clone {
+                            upsert_discovered_peer(&mut p, peer.clone());
                         }
                     }
                 }
                 DiscoveryEvent::PeerJoined(peer, plane) => {
                     if peer.peer_code != code_clone {
                         let mut p = peers_cb.lock().unwrap();
-                        if !p
-                            .iter()
-                            .any(|existing| existing.peer_code == peer.peer_code)
-                        {
-                            p.push(peer.clone());
-                        }
+                        upsert_discovered_peer(&mut p, peer.clone());
                         events_cb
                             .lock()
                             .unwrap()
@@ -391,6 +385,27 @@ pub unsafe extern "C" fn bolt_signaling_stop(handle: *mut BoltSignaling) {
     sig.handle.shutdown();
 }
 
+/// Insert a peer, or replace an unusable device name with a usable one.
+///
+/// The first usable name wins. A later `0.0.0.0` (NSHost's bind-address fallback)
+/// must not clobber "Mac Studio", and a later real name must replace `0.0.0.0`.
+fn upsert_discovered_peer(peers: &mut Vec<PeerInfo>, incoming: PeerInfo) {
+    if let Some(existing) = peers
+        .iter_mut()
+        .find(|peer| peer.peer_code == incoming.peer_code)
+    {
+        let preferred = prefer_device_name(&existing.device_name, &incoming.device_name);
+        if preferred != existing.device_name {
+            existing.device_name = preferred.to_string();
+        }
+        if existing.device_type.is_empty() && !incoming.device_type.is_empty() {
+            existing.device_type = incoming.device_type;
+        }
+        return;
+    }
+    peers.push(incoming);
+}
+
 fn cstr_to_string(ptr: *const c_char) -> String {
     if ptr.is_null() {
         return String::new();
@@ -545,6 +560,44 @@ mod tests {
             assert!(!p.device_type.is_null(), "clean device_type must convert");
             bolt_peer_free(ptr); // must not abort on the null field
         }
+    }
+
+    #[test]
+    fn upsert_replaces_bind_address_and_keeps_a_real_name() {
+        let mut peers = vec![PeerInfo {
+            peer_code: "STUDIO".into(),
+            device_name: "0.0.0.0".into(),
+            device_type: "desktop".into(),
+            wt_url: None,
+            wt_cert_hash: None,
+        }];
+        upsert_discovered_peer(
+            &mut peers,
+            PeerInfo {
+                peer_code: "STUDIO".into(),
+                device_name: "Evan's Mac Studio".into(),
+                device_type: "desktop".into(),
+                wt_url: None,
+                wt_cert_hash: None,
+            },
+        );
+        assert_eq!(peers[0].device_name, "Evan's Mac Studio");
+
+        upsert_discovered_peer(
+            &mut peers,
+            PeerInfo {
+                peer_code: "STUDIO".into(),
+                device_name: "0.0.0.0".into(),
+                device_type: "desktop".into(),
+                wt_url: None,
+                wt_cert_hash: None,
+            },
+        );
+        assert_eq!(
+            peers[0].device_name, "Evan's Mac Studio",
+            "a later bind address must not replace the real device name"
+        );
+        assert_eq!(peers.len(), 1);
     }
 
     #[test]

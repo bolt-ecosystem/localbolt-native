@@ -29,6 +29,55 @@ int bolt_probe_signal_health(void);
 /// Free a string returned by any bolt_ function.
 void bolt_free_string(char* ptr);
 
+/// Live WebTransport endpoint from wt_info.json, or null when the file is missing,
+/// unchanged from the pre-spawn baseline, or not this daemon's WS+1 port.
+/// Returned JSON is `{"url":"https://host:port","certHash":"...","port":N}`.
+/// `baseline_json` may be null when the file did not exist before spawn.
+/// Caller frees a non-null return with bolt_free_string.
+char* bolt_select_wt_advertisement(
+    const char* current_json,
+    const char* baseline_json,
+    uint16_t ws_port,
+    const char* host
+);
+
+/// Live QUIC endpoint from quic_info.json, or null for the same reasons as
+/// bolt_select_wt_advertisement. `url` is `host:port` (WS+2, no scheme).
+/// Caller frees a non-null return with bolt_free_string.
+char* bolt_select_quic_advertisement(
+    const char* current_json,
+    const char* baseline_json,
+    uint16_t ws_port,
+    const char* host
+);
+
+/// 1 when `name` is blank, a bind address, or a socket label
+/// (`0.0.0.0`, `::`, `0.0.0.0:0`, `192.168.4.25:55170`). Not for URL hosts.
+int bolt_device_name_is_unusable(const char* name);
+
+/// Name to show in the UI. Socket labels, bind addresses, and blanks become "Mac".
+/// Caller frees with bolt_free_string.
+char* bolt_device_display_name(const char* raw);
+
+/// Keep a usable `current`. Replace an unusable `current` with a usable `candidate`.
+/// Caller frees with bolt_free_string.
+char* bolt_prefer_device_name(const char* current, const char* candidate);
+
+/// 1 when `host` may appear in a wtUrl or quicAddr. LAN addresses are usable.
+/// `0.0.0.0` and `::` are not. Distinct from bolt_device_name_is_unusable.
+int bolt_host_is_usable(const char* host);
+
+/// 1 when `type_name` is blank or the daemon placeholder "unknown".
+int bolt_device_type_is_placeholder(const char* type_name);
+
+/// Keep a real `current` type. Replace "unknown" with an advertised `candidate`.
+/// Caller frees with bolt_free_string.
+char* bolt_prefer_device_type(const char* current, const char* candidate);
+
+/// Type to show. "unknown" and blanks become an empty string.
+/// Caller frees with bolt_free_string.
+char* bolt_device_display_type(const char* raw);
+
 // ── Daemon Lifecycle ────────────────────────────────────────
 
 /// Opaque daemon handle.
