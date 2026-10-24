@@ -23,7 +23,7 @@ private func localIPAddress() -> String {
         getnameinfo(ptr.pointee.ifa_addr, socklen_t(sa.sa_len),
                     &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
         let candidate = String(cString: hostname)
-        if BoltBridge.deviceNameIsUnusable(candidate) { continue }
+        if !BoltBridge.hostIsUsable(candidate) { continue }
         address = candidate
         break
     }
@@ -73,6 +73,9 @@ struct LocalBoltApp: App {
 
     /// Wire incoming signal handler so connection_request signals surface as pairing requests.
     private func wireSignalingHandler() {
+        ipc.advertisedPeerLookup = { [signaling] in
+            signaling.preferredInFlightIdentity()
+        }
         signaling.onIncomingSignal = { [self] signal in
             switch signal.signalType {
             case "connection_request":
@@ -270,22 +273,11 @@ struct ContentView: View {
         // state machine here so the UI reflects the connected session.
         .onChange(of: daemon.wtSessionActive) {
             if daemon.wtSessionActive && ipc.sessionPhase == .connecting {
-                _ = ipc.markConnected()
-                if let pending = ipc.pendingAcceptPeer {
-                    ipc.connectedPeer = pending
-                    ipc.pendingAcceptPeer = nil
-                } else if let target = ipc.pendingInitiatorPeer {
-                    ipc.connectedPeer = PeerSession(
-                        peerCode: target.peerCode,
-                        deviceName: target.deviceName,
-                        deviceType: target.deviceType,
-                        trust: .legacy,
-                        identityKeyB64: nil
-                    )
-                    ipc.pendingInitiatorPeer = nil
+                if ipc.markConnected() {
+                    ipc.adoptConnectedPeer(identityKey: nil)
+                    applyWtVerificationCode(daemon.wtSessionSAS)
+                    print("[WT-DETECT] Advanced to .connected from daemon stderr")
                 }
-                applyWtVerificationCode(daemon.wtSessionSAS)
-                print("[WT-DETECT] Advanced to .connected from daemon stderr")
             }
             if !daemon.wtSessionActive && ipc.sessionPhase == .connected {
                 ipc.disconnectSession(reason: "WT session ended")
@@ -661,8 +653,10 @@ struct ContentView: View {
     // MARK: - Incoming Request (inline)
 
     private func incomingRequestContent(request: IncomingSignal) -> some View {
-        let deviceName = BoltBridge.displayDeviceName(request.data["deviceName"] as? String ?? "Unknown Device")
-        let deviceType = request.data["deviceType"] as? String ?? "desktop"
+        let advertisedName = request.data["deviceName"] as? String ?? ""
+        let advertisedType = request.data["deviceType"] as? String ?? ""
+        let deviceName = BoltBridge.displayDeviceName(advertisedName)
+        let deviceType = BoltBridge.deviceTypeIsPlaceholder(advertisedType) ? "desktop" : advertisedType
 
         return VStack(spacing: 12) {
             HStack(spacing: 10) {
@@ -713,8 +707,8 @@ struct ContentView: View {
                     // can resolve the connected peer deterministically.
                     ipc.pendingAcceptPeer = PeerSession(
                         peerCode: request.from,
-                        deviceName: deviceName,
-                        deviceType: deviceType,
+                        deviceName: advertisedName,
+                        deviceType: advertisedType,
                         trust: .legacy,
                         identityKeyB64: nil // resolved on session-connected
                     )
@@ -1283,6 +1277,17 @@ struct PairingRequestView: View {
     /// is something the person opts into rather than the default outcome.
     @State private var rememberDevice = false
 
+    /// Socket labels from the daemon (`0.0.0.0:0`, `192.168.4.25:55170`) render as "Mac"
+    /// only when signaling never advertised a real name.
+    private var nameLabel: String {
+        BoltBridge.displayDeviceName(request.deviceName)
+    }
+
+    /// The daemon sends `unknown`. Hide that placeholder; show laptop/desktop when known.
+    private var typeLabel: String {
+        BoltBridge.displayDeviceType(request.deviceType)
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "person.crop.circle.badge.questionmark")
@@ -1294,11 +1299,13 @@ struct PairingRequestView: View {
                 .fontWeight(.bold)
 
             VStack(spacing: 4) {
-                Text(request.deviceName)
+                Text(nameLabel)
                     .font(.system(size: 15, weight: .semibold))
-                Text(request.deviceType)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                if !typeLabel.isEmpty {
+                    Text(typeLabel)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
             }
 
             if !request.sas.isEmpty {

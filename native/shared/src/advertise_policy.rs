@@ -12,7 +12,10 @@
 //! file did not exist yet) AND the port is the one this process asked the daemon to
 //! bind. Peer display names follow the same rule in the other direction: a bind
 //! address such as `0.0.0.0` (what `Host.localizedName` returns on some Macs) is
-//! never shown when a real device name is available.
+//! never shown when a real device name is available. A socket label
+//! (`192.168.4.25:55170`, `0.0.0.0:0`, `::`) is the same kind of placeholder:
+//! the daemon's pairing IPC puts `peer_addr` in `remote_device_name`, and the
+//! Mac sheet must keep the name signaling already advertised.
 
 use serde_json::Value;
 
@@ -147,16 +150,33 @@ pub fn is_bind_address(name: &str) -> bool {
     )
 }
 
-/// Empty names and bind addresses are not human device names.
-/// A value that is only `0.0.0.0` or `https://0.0.0.0:port` is the wildcard
-/// listen address, not `Host.localizedName`.
+/// Empty names, bind addresses, and socket labels are not human device names.
+///
+/// `0.0.0.0` is the wildcard `Host.localizedName` returns on some Macs.
+/// `0.0.0.0:0` and `192.168.4.25:55170` are what bolt-daemon writes into
+/// `remote_device_name` (a synthetic WS address, or `peer_addr`). A LAN address
+/// is still a usable WebTransport host — that check is [`host_is_usable`].
 pub fn device_name_is_unusable(name: &str) -> bool {
     let trimmed = name.trim();
-    if trimmed.is_empty() || is_bind_address(trimmed) {
+    if trimmed.is_empty() || is_bind_address(trimmed) || looks_like_ip_or_socket(trimmed) {
         return true;
     }
     if let Some(host) = host_of_endpoint_shaped_name(trimmed) {
-        return is_bind_address(host);
+        return is_bind_address(host) || looks_like_ip_or_socket(host);
+    }
+    false
+}
+
+/// True for an IP address or `ip:port`, including bracketed IPv6.
+fn looks_like_ip_or_socket(name: &str) -> bool {
+    let trimmed = name.trim();
+    if trimmed.parse::<std::net::SocketAddr>().is_ok()
+        || trimmed.parse::<std::net::IpAddr>().is_ok()
+    {
+        return true;
+    }
+    if let Some(inner) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+        return inner.parse::<std::net::IpAddr>().is_ok() || is_bind_address(inner);
     }
     false
 }
@@ -167,15 +187,57 @@ fn host_of_endpoint_shaped_name(name: &str) -> Option<&str> {
     if hostport.is_empty() {
         return None;
     }
+    if let Some(rest) = hostport.strip_prefix('[') {
+        let (host, after) = rest.split_once(']')?;
+        if host.is_empty() {
+            return None;
+        }
+        if after.is_empty() {
+            return Some(host);
+        }
+        let port = after.strip_prefix(':')?;
+        if port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        return Some(host);
+    }
     let (host, port) = hostport.rsplit_once(':')?;
-    if port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
+    if host.is_empty() || port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
         return None;
     }
-    // IPv6 literals contain extra colons; only split host:port for names and IPv4.
+    // A bare IPv6 literal has more than one colon and no brackets.
     if host.contains(':') {
         return None;
     }
     Some(host)
+}
+
+/// Daemon pairing IPC sends `remote_device_type: "unknown"`. That is not a
+/// type the peer advertised.
+pub fn device_type_is_placeholder(type_name: &str) -> bool {
+    matches!(
+        type_name.trim().to_ascii_lowercase().as_str(),
+        "" | "unknown"
+    )
+}
+
+/// Keep a real current type. A placeholder yields a candidate the peer advertised.
+pub fn prefer_device_type<'a>(current: &'a str, candidate: &'a str) -> &'a str {
+    if device_type_is_placeholder(current) && !device_type_is_placeholder(candidate) {
+        candidate.trim()
+    } else {
+        current
+    }
+}
+
+/// Type label for the ask sheet. Placeholders become empty so the UI can omit them.
+pub fn display_device_type(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if device_type_is_placeholder(trimmed) {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Keep a usable current name. An unusable current name yields a usable candidate.
@@ -282,7 +344,7 @@ pub unsafe extern "C" fn bolt_device_name_is_unusable(name: *const std::os::raw:
     }
 }
 
-/// Device name to display. Bind addresses and blanks become `"Mac"`.
+/// Device name to display. Socket labels, bind addresses, and blanks become `"Mac"`.
 ///
 /// # Safety
 /// `raw` must be null or a valid nul-terminated UTF-8 string. Caller frees the
@@ -307,6 +369,62 @@ pub unsafe extern "C" fn bolt_prefer_device_name(
     let current = cstr_owned(current);
     let candidate = cstr_owned(candidate);
     owned_c_string(prefer_device_name(&current, &candidate).to_string())
+}
+
+/// 1 when `host` may be advertised in a WebTransport or QUIC URL.
+/// A LAN address is usable here even though it is not a device name.
+///
+/// # Safety
+/// `host` must be null or a valid nul-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_host_is_usable(host: *const std::os::raw::c_char) -> i32 {
+    if host_is_usable(&cstr_owned(host)) {
+        1
+    } else {
+        0
+    }
+}
+
+/// 1 when `type_name` is blank or the daemon placeholder `"unknown"`.
+///
+/// # Safety
+/// `type_name` must be null or a valid nul-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_device_type_is_placeholder(
+    type_name: *const std::os::raw::c_char,
+) -> i32 {
+    if device_type_is_placeholder(&cstr_owned(type_name)) {
+        1
+    } else {
+        0
+    }
+}
+
+/// Keep a real `current` type. Replace `"unknown"` with an advertised `candidate`.
+///
+/// # Safety
+/// Pointers must be null or valid nul-terminated UTF-8. Caller frees the result
+/// with `bolt_free_string`.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_prefer_device_type(
+    current: *const std::os::raw::c_char,
+    candidate: *const std::os::raw::c_char,
+) -> *mut std::os::raw::c_char {
+    let current = cstr_owned(current);
+    let candidate = cstr_owned(candidate);
+    owned_c_string(prefer_device_type(&current, &candidate).to_string())
+}
+
+/// Type to show. `"unknown"` and blanks become an empty string.
+///
+/// # Safety
+/// `raw` must be null or a valid nul-terminated UTF-8 string. Caller frees the
+/// result with `bolt_free_string`.
+#[no_mangle]
+pub unsafe extern "C" fn bolt_device_display_type(
+    raw: *const std::os::raw::c_char,
+) -> *mut std::os::raw::c_char {
+    owned_c_string(display_device_type(&cstr_owned(raw)))
 }
 
 #[cfg(test)]
@@ -421,6 +539,53 @@ mod tests {
         assert_eq!(display_device_name("0.0.0.0"), "Mac");
         assert_eq!(display_device_name("  "), "Mac");
         assert_eq!(display_device_name("  Mac Studio  "), "Mac Studio");
+    }
+
+    #[test]
+    fn socket_address_device_name_loses_to_the_advertised_name() {
+        assert!(device_name_is_unusable("0.0.0.0:0"));
+        assert!(device_name_is_unusable("192.168.4.25:55170"));
+        assert!(device_name_is_unusable("192.168.4.25"));
+        assert!(device_name_is_unusable("::"));
+        assert!(device_name_is_unusable("::1"));
+        assert!(device_name_is_unusable("[::1]:55170"));
+        assert!(device_name_is_unusable("https://192.168.4.25:9101"));
+        assert!(device_name_is_unusable("https://[::1]:9101"));
+        assert!(!device_name_is_unusable("Evan's MacBook Pro"));
+        assert!(!device_name_is_unusable("Evan\u{2019}s MacBook Pro"));
+        assert!(!device_name_is_unusable("Mac"));
+        assert_eq!(
+            prefer_device_name("192.168.4.25:55170", "Evan\u{2019}s MacBook Pro"),
+            "Evan\u{2019}s MacBook Pro"
+        );
+        assert_eq!(
+            prefer_device_name("0.0.0.0:0", "Evan's MacBook Pro"),
+            "Evan's MacBook Pro"
+        );
+        assert_eq!(
+            prefer_device_name("Evan's MacBook Pro", "192.168.4.25:55170"),
+            "Evan's MacBook Pro"
+        );
+        assert_eq!(display_device_name("192.168.4.25:55170"), "Mac");
+        assert_eq!(display_device_name("0.0.0.0:0"), "Mac");
+        // A LAN address is a bad device name and a good WebTransport host.
+        assert!(host_is_usable("192.168.4.25"));
+        assert!(host_is_usable("10.0.0.1"));
+        assert!(!host_is_usable("0.0.0.0"));
+        assert!(!host_is_usable("::"));
+    }
+
+    #[test]
+    fn unknown_device_type_loses_to_the_advertised_type() {
+        assert!(device_type_is_placeholder("unknown"));
+        assert!(device_type_is_placeholder("  "));
+        assert!(!device_type_is_placeholder("desktop"));
+        assert!(!device_type_is_placeholder("laptop"));
+        assert_eq!(prefer_device_type("unknown", "laptop"), "laptop");
+        assert_eq!(prefer_device_type("desktop", "unknown"), "desktop");
+        assert_eq!(prefer_device_type("unknown", "unknown"), "unknown");
+        assert_eq!(display_device_type("unknown"), "");
+        assert_eq!(display_device_type(" desktop "), "desktop");
     }
 
     #[test]

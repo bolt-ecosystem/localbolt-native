@@ -60,7 +60,8 @@ extension BoltBridge {
         }
     }
 
-    /// Name shown in the device list. Never a bind address.
+    /// Name shown in the device list, ask sheet, and session header.
+    /// Socket labels and bind addresses become "Mac".
     static func displayDeviceName(_ raw: String) -> String {
         raw.withCString { ptr in
             guard let out = bolt_device_display_name(ptr) else { return "Mac" }
@@ -69,7 +70,7 @@ extension BoltBridge {
         }
     }
 
-    /// Keep a real name. Replace `0.0.0.0` (and other bind addresses) when a real one exists.
+    /// Keep a real name. Replace a socket label or bind address when a real one exists.
     static func preferDeviceName(current: String, candidate: String) -> String {
         current.withCString { currentPtr in
             candidate.withCString { candidatePtr in
@@ -82,6 +83,36 @@ extension BoltBridge {
 
     static func deviceNameIsUnusable(_ name: String) -> Bool {
         name.withCString { bolt_device_name_is_unusable($0) == 1 }
+    }
+
+    /// LAN addresses are usable URL hosts. `0.0.0.0` and `::` are not.
+    /// Distinct from `deviceNameIsUnusable`, which rejects every socket label.
+    static func hostIsUsable(_ host: String) -> Bool {
+        host.withCString { bolt_host_is_usable($0) == 1 }
+    }
+
+    static func deviceTypeIsPlaceholder(_ typeName: String) -> Bool {
+        typeName.withCString { bolt_device_type_is_placeholder($0) == 1 }
+    }
+
+    /// Keep a real type. Replace the daemon's `"unknown"` when signaling advertised one.
+    static func preferDeviceType(current: String, candidate: String) -> String {
+        current.withCString { currentPtr in
+            candidate.withCString { candidatePtr in
+                guard let out = bolt_prefer_device_type(currentPtr, candidatePtr) else { return current }
+                defer { bolt_free_string(out) }
+                return String(cString: out)
+            }
+        }
+    }
+
+    /// Ask-sheet type label. `"unknown"` becomes empty so the row can be omitted.
+    static func displayDeviceType(_ raw: String) -> String {
+        raw.withCString { ptr in
+            guard let out = bolt_device_display_type(ptr) else { return "" }
+            defer { bolt_free_string(out) }
+            return String(cString: out)
+        }
     }
 
     private static func parseAdvertisement(_ json: String) -> AdvertisedEndpoint? {

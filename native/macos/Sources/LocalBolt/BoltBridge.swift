@@ -458,6 +458,25 @@ final class SignalingManager {
         userNotice = nil
     }
 
+    /// Human name and type for the peer currently being paired.
+    ///
+    /// The daemon ask sheet only has a socket address. Prefer the in-flight
+    /// connection request, otherwise the sole discovered peer. Several peers and
+    /// no request is ambiguous, so this returns nil and the caller keeps the
+    /// pending accept/initiator record.
+    func preferredInFlightIdentity() -> (name: String, type: String)? {
+        if let request = incomingConnectionRequest {
+            let name = request.data["deviceName"] as? String ?? ""
+            let type = request.data["deviceType"] as? String ?? ""
+            if !BoltBridge.deviceNameIsUnusable(name) {
+                return (name, type)
+            }
+        }
+        let named = peers.filter { !BoltBridge.deviceNameIsUnusable($0.deviceName) }
+        guard named.count == 1, let peer = named.first else { return nil }
+        return (peer.deviceName, peer.deviceType)
+    }
+
     /// Remember a real device name learned from a connection payload when the
     /// discovery list still has a bind address.
     func notePeerDeviceName(peerCode: String, advertised: String) {
@@ -738,6 +757,9 @@ final class IpcManager {
     var pendingAcceptPeer: PeerSession?
     /// Peer info stashed by initiator for name resolution on session.connected.
     var pendingInitiatorPeer: DiscoveredPeer?
+    /// Signaling name/type for the in-flight peer. The daemon pairing payload
+    /// only carries a socket address (`remote_device_name`) and `"unknown"`.
+    var advertisedPeerLookup: (() -> (name: String, type: String)?)?
 
     /// TOFU pin store for persistent identity verification.
     private(set) var pinStore: PinStore?
@@ -895,16 +917,80 @@ final class IpcManager {
         }
 
         if decision.isAllow, let req = pendingRequest {
+            // Do not replace a signaling name with the daemon's peer_addr string.
+            let resolved = resolvePeerLabel(daemonName: req.deviceName, daemonType: req.deviceType)
             pendingAcceptPeer = PeerSession(
-                peerCode: req.requestId,
-                deviceName: req.deviceName,
-                deviceType: req.deviceType,
+                peerCode: pendingAcceptPeer?.peerCode ?? req.requestId,
+                deviceName: resolved.name,
+                deviceType: resolved.type,
                 trust: req.sas.isEmpty ? .legacy : .unverified(sas: req.sas),
-                identityKeyB64: nil // resolved on session-connected
+                identityKeyB64: pendingAcceptPeer?.identityKeyB64
             )
         }
 
         pendingRequest = nil
+    }
+
+    /// Prefer a signaling / pending peer name over the daemon socket label.
+    ///
+    /// bolt-daemon sets `remote_device_name` to `peer_addr` (`192.168.4.25:55170`
+    /// or the synthetic `0.0.0.0:0`) and `remote_device_type` to `"unknown"`.
+    /// `pendingAcceptPeer` and `pendingInitiatorPeer` already hold the advertised
+    /// identity. The lookup covers the ask sheet arriving before those are set,
+    /// and a single discovered peer when the request was already consumed.
+    func resolvePeerLabel(daemonName: String, daemonType: String) -> (name: String, type: String) {
+        var name = daemonName
+        var type = daemonType
+        func fold(_ candidateName: String, _ candidateType: String) {
+            name = BoltBridge.preferDeviceName(current: name, candidate: candidateName)
+            type = BoltBridge.preferDeviceType(current: type, candidate: candidateType)
+        }
+        if let pending = pendingAcceptPeer {
+            fold(pending.deviceName, pending.deviceType)
+        }
+        if let pending = pendingInitiatorPeer {
+            fold(pending.deviceName, pending.deviceType)
+        }
+        if let hinted = advertisedPeerLookup?() {
+            fold(hinted.name, hinted.type)
+        }
+        return (name, type)
+    }
+
+    /// Copy the in-flight peer into `connectedPeer`, keeping a human name.
+    func adoptConnectedPeer(identityKey: String?) {
+        if let pending = pendingAcceptPeer {
+            let resolved = resolvePeerLabel(daemonName: pending.deviceName, daemonType: pending.deviceType)
+            connectedPeer = PeerSession(
+                peerCode: pending.peerCode,
+                deviceName: resolved.name,
+                deviceType: resolved.type,
+                trust: pending.trust,
+                identityKeyB64: identityKey ?? pending.identityKeyB64
+            )
+            pendingAcceptPeer = nil
+        } else if let target = pendingInitiatorPeer {
+            let resolved = resolvePeerLabel(daemonName: target.deviceName, daemonType: target.deviceType)
+            connectedPeer = PeerSession(
+                peerCode: identityKey ?? target.peerCode,
+                deviceName: resolved.name,
+                deviceType: resolved.type,
+                trust: .legacy,
+                identityKeyB64: identityKey
+            )
+            pendingInitiatorPeer = nil
+        } else if let peerCode = identityKey {
+            let resolved = resolvePeerLabel(daemonName: "", daemonType: "")
+            let name = BoltBridge.deviceNameIsUnusable(resolved.name) ? "Peer" : resolved.name
+            let type = BoltBridge.deviceTypeIsPlaceholder(resolved.type) ? "desktop" : resolved.type
+            connectedPeer = PeerSession(
+                peerCode: peerCode,
+                deviceName: name,
+                deviceType: type,
+                trust: .legacy,
+                identityKeyB64: identityKey
+            )
+        }
     }
 
     /// Approve the current session (user confirmed the SAS match).
@@ -958,11 +1044,14 @@ final class IpcManager {
 
             switch event {
             case "daemon://pairing-request":
+                let rawName = payload["remote_device_name"] as? String ?? ""
+                let rawType = payload["remote_device_type"] as? String ?? ""
+                let resolved = resolvePeerLabel(daemonName: rawName, daemonType: rawType)
                 let req = PairingRequest(
                     id: payload["request_id"] as? String ?? UUID().uuidString,
                     requestId: payload["request_id"] as? String ?? "",
-                    deviceName: payload["remote_device_name"] as? String ?? "Unknown Device",
-                    deviceType: payload["remote_device_type"] as? String ?? "desktop",
+                    deviceName: resolved.name,
+                    deviceType: resolved.type,
                     sas: payload["sas"] as? String ?? ""
                 )
                 pendingRequest = req
@@ -981,40 +1070,18 @@ final class IpcManager {
                 }
                 let remoteIdentityKey = payload["remote_peer_id"] as? String
                 if markConnected() {
-                    // Resolve peer info: acceptor has pendingAcceptPeer,
-                    // initiator has pendingInitiatorPeer.
-                    if let pending = pendingAcceptPeer {
-                        var peer = pending
-                        peer.identityKeyB64 = remoteIdentityKey
-                        connectedPeer = peer
-                        pendingAcceptPeer = nil
-                    } else if let target = pendingInitiatorPeer {
-                        let remotePk = remoteIdentityKey ?? target.peerCode
-                        connectedPeer = PeerSession(
-                            peerCode: remotePk,
-                            deviceName: target.deviceName,
-                            deviceType: target.deviceType,
-                            trust: .legacy,
-                            identityKeyB64: remoteIdentityKey
-                        )
-                        pendingInitiatorPeer = nil
-                    } else if let peerCode = remoteIdentityKey {
-                        connectedPeer = PeerSession(
-                            peerCode: peerCode,
-                            deviceName: "Peer",
-                            deviceType: "desktop",
-                            trust: .legacy,
-                            identityKeyB64: remoteIdentityKey
-                        )
-                    }
+                    adoptConnectedPeer(identityKey: remoteIdentityKey)
                 }
 
             case "daemon://session-sas":
                 if let sas = payload["sas"] as? String {
                     let identityKey = payload["remote_identity_pk_b64"] as? String
                         ?? connectedPeer?.identityKeyB64
-                    let peerName = connectedPeer?.deviceName
-                    // M7: Check for TOFU identity mismatch before anything else
+                    let peerName = connectedPeer.flatMap { peer -> String? in
+                        BoltBridge.deviceNameIsUnusable(peer.deviceName) ? nil : peer.deviceName
+                    }
+                    // M7: Check for TOFU identity mismatch before anything else.
+                    // A socket address is not a device name, so it is not pinned.
                     if let key = identityKey, let name = peerName,
                        let oldKey = pinStore?.checkMismatch(identityKeyB64: key, deviceName: name) {
                         connectedPeer?.trust = .mismatch(deviceName: name, oldKeyPrefix: oldKey)
